@@ -173,6 +173,25 @@ def test_provenance_booleans_must_be_real_booleans(field_name: str) -> None:
         )
 
 
+@pytest.mark.parametrize("bad_ai_tool", [None, ""])
+def test_ai_assisted_records_require_ai_tool(bad_ai_tool: object) -> None:
+    bad_provenance = provenance(ai_assisted=True)
+    bad_provenance["ai_tool"] = bad_ai_tool
+
+    with pytest.raises(
+        SchemaError, match="ai_tool must be a non-empty string when ai_assisted is true"
+    ):
+        parse_record(
+            {
+                "id": "sft_missing_ai_tool",
+                "dataset_type": "sft",
+                "prompt": "要約してください。",
+                "response": "要約します。",
+                "provenance": bad_provenance,
+            }
+        )
+
+
 def test_dpo_record_rejects_equal_preference_pair_after_normalization() -> None:
     with pytest.raises(SchemaError, match="chosen and rejected must differ"):
         parse_record(

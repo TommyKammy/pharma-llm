@@ -94,6 +94,14 @@ class ProvenanceMetadata:
         if any(not isinstance(flag, str) or not flag.strip() for flag in risk_flags):
             raise ValueError("risk_flags must contain only non-empty strings")
 
+        ai_assisted = require_bool(value.get("ai_assisted", False), "ai_assisted")
+        raw_ai_tool = value.get("ai_tool")
+        if ai_assisted and (
+            not isinstance(raw_ai_tool, str) or not raw_ai_tool.strip()
+        ):
+            raise ValueError("ai_tool must be a non-empty string when ai_assisted is true")
+        ai_tool = require_optional_string(raw_ai_tool, "ai_tool")
+
         return cls(
             source_type=source_type,
             source_document=require_non_empty_string(
@@ -103,8 +111,8 @@ class ProvenanceMetadata:
                 value["source_license"], "source_license"
             ),
             review_status=review_status,
-            ai_assisted=require_bool(value.get("ai_assisted", False), "ai_assisted"),
-            ai_tool=require_optional_string(value.get("ai_tool"), "ai_tool"),
+            ai_assisted=ai_assisted,
+            ai_tool=ai_tool,
             raw_ai_output_used_as_training_target=require_bool(
                 value.get("raw_ai_output_used_as_training_target", False),
                 "raw_ai_output_used_as_training_target",
