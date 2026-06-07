@@ -51,6 +51,14 @@ Optional packages are warnings until the relevant sub-workflow is being executed
 
 `make phase1-smoke` runs local smoke checks for MLX, Argilla sample generation, promptfoo mock-provider evaluation, and DeepEval exact-match evaluation.
 
+Additional checks that download or contact external services are kept separate:
+
+```bash
+make mlx-generate-smoke
+make mlx-lora-smoke
+make argilla-server-smoke
+```
+
 ## Recommended Local Artifact Roots
 
 Keep large artifacts outside Git:

@@ -1,4 +1,4 @@
-.PHONY: help test lint env-check mlx-smoke argilla-smoke promptfoo-smoke deepeval-smoke phase1-smoke validate-data
+.PHONY: help test lint env-check mlx-smoke mlx-generate-smoke mlx-lora-smoke argilla-smoke argilla-server-smoke promptfoo-smoke deepeval-smoke phase1-smoke validate-data
 
 help:
 	@echo "pharma-llm commands"
@@ -6,7 +6,10 @@ help:
 	@echo "  make lint              Run ruff checks"
 	@echo "  make env-check         Inspect local Phase 1 toolchain state"
 	@echo "  make mlx-smoke         Run MLX runtime smoke check"
+	@echo "  make mlx-generate-smoke Run tiny MLX model generation smoke check"
+	@echo "  make mlx-lora-smoke    Run tiny MLX LoRA training smoke check"
 	@echo "  make argilla-smoke     Create offline Argilla review sample"
+	@echo "  make argilla-server-smoke Register sample if ARGILLA_API_URL/API_KEY work"
 	@echo "  make promptfoo-smoke   Run promptfoo with local mock providers"
 	@echo "  make deepeval-smoke    Run DeepEval exact-match sample"
 	@echo "  make phase1-smoke      Run all Phase 1 smoke checks"
@@ -24,8 +27,17 @@ env-check:
 mlx-smoke:
 	uv run python scripts/run_mlx_smoke.py
 
+mlx-generate-smoke:
+	uv run python scripts/run_mlx_generate_smoke.py
+
+mlx-lora-smoke:
+	uv run python scripts/run_mlx_lora_smoke.py
+
 argilla-smoke:
 	uv run python scripts/create_argilla_sample.py
+
+argilla-server-smoke:
+	uv run python scripts/register_argilla_sample.py
 
 promptfoo-smoke:
 	PROMPTFOO_PYTHON=$$(pwd)/.venv/bin/python npx promptfoo@latest eval -c configs/promptfoo/phase1_smoke.yaml --no-progress-bar --no-table --output /tmp/pharma-llm-promptfoo-smoke.json

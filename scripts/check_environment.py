@@ -80,6 +80,8 @@ def collect_checks() -> list[Check]:
         Check("host memory", mem_ok, memory_gb, required=False),
         command_check("uv", "uv", "--version"),
         command_check("git", "git", "--version"),
+        command_check("Docker CLI", "docker", "--version", required=False),
+        command_check("Docker daemon", "docker", "ps", required=False),
         Check("Node.js for promptfoo", node_ready, node_detail if node_ok else "not found"),
         command_check("npm", "npm", "--version"),
         python_module_check("mlx_lm", "mlx-lm", required=False),
