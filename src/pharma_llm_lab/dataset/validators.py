@@ -14,6 +14,7 @@ from pharma_llm_lab.dataset.schema import (
     SchemaError,
     parse_record,
 )
+from pharma_llm_lab.dataset.provenance import TRAINING_BLOCKED_SOURCE_TYPES
 
 
 class ValidationMode(str):
@@ -74,6 +75,29 @@ def iter_jsonl(path: Path) -> Iterable[tuple[int, dict[str, Any] | ValidationErr
             yield line_number, value
 
 
+def describe_training_policy_failures(record: DatasetRecord) -> tuple[str, ...]:
+    failures: list[str] = []
+
+    if isinstance(record, EvalRecord):
+        failures.append("dataset_type 'eval' is reserved for evaluation")
+
+    if record.provenance.source_type in TRAINING_BLOCKED_SOURCE_TYPES:
+        failures.append(
+            f"source_type {record.provenance.source_type.value!r} is blocked for training"
+        )
+
+    if record.provenance.raw_ai_output_used_as_training_target:
+        failures.append("raw_ai_output_used_as_training_target is true")
+
+    if not record.provenance.is_reviewed_for_training:
+        failures.append(
+            f"review_status {record.provenance.review_status.value!r} "
+            "is not approved for training"
+        )
+
+    return tuple(failures)
+
+
 def validate_record_policy(
     record: DatasetRecord,
     *,
@@ -93,13 +117,13 @@ def validate_record_policy(
     if expected_dataset_type is DatasetType.EVAL:
         return errors
 
-    if isinstance(record, EvalRecord) or record.provenance.is_blocked_for_training:
+    training_policy_failures = describe_training_policy_failures(record)
+    if training_policy_failures:
         errors.append(
             ValidationError(
                 line_number,
-                "record is not eligible for training "
-                f"(source_type={record.provenance.source_type.value!r}, "
-                f"review_status={record.provenance.review_status.value!r})",
+                "record is not eligible for training: "
+                + "; ".join(training_policy_failures),
             )
         )
 
