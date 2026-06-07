@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+.ipynb_checkpoints/
+
+# Node / JavaScript tooling used by promptfoo or report tooling
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+.pnpm-store/
+
+# Models, adapters, and heavy artifacts
+models/
+model_weights/
+adapters/
+checkpoints/
+*.ckpt
+*.safetensors
+*.gguf
+*.mlx
+*.bin
+*.pt
+*.pth
+*.npz
+
+# Data policy: keep raw/internal/local data out of Git
+data/raw/
+data/internal/
+data/local/
+data/argilla_exports/
+data/prepared/**/*.jsonl
+data/prepared/**/*.json
+data/prepared/**/*.parquet
+data/prepared/**/*.csv
+
+# Experiment outputs
+results/**
+!results/
+!results/README.md
+!results/reports/
+!results/reports/index.md
+
+# Logs
+logs/
+*.log
+
+# Local service state
+.argilla/
+.cache/
