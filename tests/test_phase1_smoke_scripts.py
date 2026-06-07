@@ -6,9 +6,13 @@ from scripts.run_mlx_lora_smoke import TRAIN_RECORDS
 def test_argilla_sample_records_preserve_review_metadata() -> None:
     records = sample_records()
     assert records
-    assert all("review_status" in record for record in records)
     assert all(
-        record["metadata"]["raw_ai_output_used_as_training_target"] is False
+        "review_status" in record["provenance"]
+        and "risk_flags" in record["provenance"]
+        for record in records
+    )
+    assert all(
+        record["provenance"]["source_license"] == "synthetic_test_only"
         for record in records
     )
 
