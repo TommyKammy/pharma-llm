@@ -1,0 +1,24 @@
+description: Phase 1 local promptfoo smoke test with mock Python providers
+
+prompts:
+  - "Summarize this safety note for {{audience}}: {{note}}"
+
+providers:
+  - id: "file://../../scripts/promptfoo_mock_provider.py:call_api"
+    label: "mock-conservative"
+    config:
+      style: conservative
+  - id: "file://../../scripts/promptfoo_mock_provider.py:call_api"
+    label: "mock-concise"
+    config:
+      style: concise
+
+tests:
+  - vars:
+      audience: QA
+      note: "A new signal was reported, but causality has not been assessed."
+    assert:
+      - type: contains
+        value: "review_required"
+      - type: contains
+        value: "QA"

@@ -11,6 +11,20 @@ dev = [
   "pytest>=8.0",
   "ruff>=0.4",
 ]
+training = [
+  "mlx-lm",
+]
+review = [
+  "argilla",
+]
+eval = [
+  "deepeval",
+]
+phase1 = [
+  "mlx-lm",
+  "argilla",
+  "deepeval",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -21,9 +35,8 @@ packages = ["src/pharma_llm_lab"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-

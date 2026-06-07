@@ -73,4 +73,6 @@ logs/
 
 # Local service state
 .argilla/
+.promptfoo/
+.deepeval/
 .cache/
