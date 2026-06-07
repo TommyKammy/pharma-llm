@@ -137,6 +137,39 @@ make argilla-server-smoke
 
 This does not require a running server. Server-backed registration is a separate check once a local or private Argilla instance is available.
 
+## Offline Export / Import
+
+Before wiring a live Argilla server, Phase 3 uses local JSONL payloads to verify
+the review contract.
+
+Export synthetic candidates into an Argilla-friendly review payload:
+
+```bash
+uv run python scripts/export_to_argilla.py \
+  /Users/tsinfra/Dev/pharma-llm/local/argilla/phase3_review_sample.jsonl \
+  /Users/tsinfra/Dev/pharma-llm/local/argilla/phase3_review_payload.jsonl
+```
+
+The exported payload contains:
+
+- `fields`: values reviewers should inspect
+- `provenance`: Phase 2 provenance metadata preserved as-is
+- `review`: editable review fields
+- `original_record`: the full source record used for round-trip import
+
+After review, import the reviewed payload back into dataset JSONL:
+
+```bash
+uv run python scripts/import_from_argilla.py \
+  /Users/tsinfra/Dev/pharma-llm/local/argilla/phase3_review_payload.jsonl \
+  /Users/tsinfra/Dev/pharma-llm/local/argilla/phase3_reviewed_dataset.jsonl
+```
+
+Import updates only provenance review metadata and removes the local `argilla`
+helper section from the dataset record. It rejects invalid review statuses,
+missing reviewer metadata on approved records, malformed risk flags, and malformed
+payloads with clear CLI errors.
+
 `make argilla-server-smoke` checks `ARGILLA_API_URL` and `ARGILLA_API_KEY`. If no API key is set, it records a skipped result under:
 
 ```text
@@ -147,7 +180,7 @@ This does not require a running server. Server-backed registration is a separate
 
 Only records with approved review state may be exported to training datasets. AI-assisted candidates remain non-training data until human review or human editing is complete.
 
-Later phases will add:
+Phase 3 includes the offline foundations:
 
 ```text
 scripts/export_to_argilla.py
