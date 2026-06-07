@@ -66,4 +66,10 @@ uv sync
 uv run pytest
 ```
 
+Validate a JSONL dataset before using it in training or evaluation workflows:
+
+```bash
+uv run python scripts/validate_dataset.py --dataset-type sft path/to/train.jsonl
+```
+
 Phase 0 intentionally contains scaffolding and documentation first. Implementation-heavy code starts in later phases.
