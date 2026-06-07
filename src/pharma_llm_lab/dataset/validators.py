@@ -116,6 +116,12 @@ def validate_jsonl(path: Path, dataset_type: DatasetType) -> ValidationResult:
             dataset_type=dataset_type,
             errors=(ValidationError(0, f"file does not exist: {path}"),),
         )
+    if not path.is_file():
+        return ValidationResult(
+            path=path,
+            dataset_type=dataset_type,
+            errors=(ValidationError(0, f"path is not a file: {path}"),),
+        )
 
     for line_number, item in iter_jsonl(path):
         if isinstance(item, ValidationError):

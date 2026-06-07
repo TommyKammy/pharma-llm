@@ -87,6 +87,13 @@ def test_validate_jsonl_rejects_bad_review_status(tmp_path: Path) -> None:
     assert "invalid review_status" in result.errors[0].message
 
 
+def test_validate_jsonl_rejects_directory_path(tmp_path: Path) -> None:
+    result = validate_jsonl(tmp_path, parse_dataset_type("sft"))
+
+    assert not result.ok
+    assert "path is not a file" in result.errors[0].message
+
+
 def test_validate_jsonl_rejects_eval_leakage_in_training_dataset(
     tmp_path: Path,
 ) -> None:
@@ -130,6 +137,29 @@ def test_validate_dataset_cli_success(tmp_path: Path) -> None:
         ],
         check=False,
         capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "OK: 1 sft record" in result.stdout
+
+
+def test_validate_dataset_cli_works_from_uninstalled_source_checkout(
+    tmp_path: Path,
+) -> None:
+    path = write_jsonl(tmp_path / "sft.jsonl", [valid_sft_record()])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path("scripts/validate_dataset.py").resolve()),
+            "--dataset-type",
+            "sft",
+            str(path),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
         text=True,
     )
 
