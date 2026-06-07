@@ -38,6 +38,24 @@ TRAINING_BLOCKED_SOURCE_TYPES = {
 }
 
 
+def require_non_empty_string(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string")
+    return value
+
+
+def require_optional_string(value: Any, field_name: str) -> str | None:
+    if value is None:
+        return None
+    return require_non_empty_string(value, field_name)
+
+
+def require_bool(value: Any, field_name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a boolean")
+    return value
+
+
 @dataclass(frozen=True)
 class ProvenanceMetadata:
     source_type: SourceType
@@ -73,20 +91,29 @@ class ProvenanceMetadata:
             risk_flags = ()
         if not isinstance(risk_flags, list | tuple):
             raise ValueError("risk_flags must be a list or tuple")
+        if any(not isinstance(flag, str) or not flag.strip() for flag in risk_flags):
+            raise ValueError("risk_flags must contain only non-empty strings")
 
         return cls(
             source_type=source_type,
-            source_document=str(value["source_document"]),
-            source_license=str(value["source_license"]),
-            review_status=review_status,
-            ai_assisted=bool(value.get("ai_assisted", False)),
-            ai_tool=value.get("ai_tool"),
-            raw_ai_output_used_as_training_target=bool(
-                value.get("raw_ai_output_used_as_training_target", False)
+            source_document=require_non_empty_string(
+                value["source_document"], "source_document"
             ),
-            human_reviewer=value.get("human_reviewer"),
-            review_date=value.get("review_date"),
-            risk_flags=tuple(str(flag) for flag in risk_flags),
+            source_license=require_non_empty_string(
+                value["source_license"], "source_license"
+            ),
+            review_status=review_status,
+            ai_assisted=require_bool(value.get("ai_assisted", False), "ai_assisted"),
+            ai_tool=require_optional_string(value.get("ai_tool"), "ai_tool"),
+            raw_ai_output_used_as_training_target=require_bool(
+                value.get("raw_ai_output_used_as_training_target", False),
+                "raw_ai_output_used_as_training_target",
+            ),
+            human_reviewer=require_optional_string(
+                value.get("human_reviewer"), "human_reviewer"
+            ),
+            review_date=require_optional_string(value.get("review_date"), "review_date"),
+            risk_flags=tuple(risk_flags),
         )
 
     @property

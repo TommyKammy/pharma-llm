@@ -133,6 +133,89 @@ def test_invalid_review_status_is_invalid() -> None:
         )
 
 
+@pytest.mark.parametrize("field_name", ["source_document", "source_license"])
+@pytest.mark.parametrize("bad_value", [None, ""])
+def test_missing_provenance_string_values_are_invalid(
+    field_name: str, bad_value: object
+) -> None:
+    bad_provenance = provenance()
+    bad_provenance[field_name] = bad_value
+
+    with pytest.raises(SchemaError, match=f"{field_name} must be a non-empty string"):
+        parse_record(
+            {
+                "id": "sft_bad_provenance_value",
+                "dataset_type": "sft",
+                "prompt": "要約してください。",
+                "response": "要約します。",
+                "provenance": bad_provenance,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["ai_assisted", "raw_ai_output_used_as_training_target"],
+)
+def test_provenance_booleans_must_be_real_booleans(field_name: str) -> None:
+    bad_provenance = provenance()
+    bad_provenance[field_name] = "false"
+
+    with pytest.raises(SchemaError, match=f"{field_name} must be a boolean"):
+        parse_record(
+            {
+                "id": "sft_bad_boolean",
+                "dataset_type": "sft",
+                "prompt": "要約してください。",
+                "response": "要約します。",
+                "provenance": bad_provenance,
+            }
+        )
+
+
+def test_dpo_record_rejects_equal_preference_pair_after_normalization() -> None:
+    with pytest.raises(SchemaError, match="chosen and rejected must differ"):
+        parse_record(
+            {
+                "id": "dpo_equal_pair",
+                "dataset_type": "dpo",
+                "prompt": "比較してください。",
+                "chosen": "Confirm source evidence before answering.",
+                "rejected": "  Confirm   source evidence before answering. ",
+                "provenance": provenance(),
+            }
+        )
+
+
+def test_eval_record_requires_eval_only_source_type() -> None:
+    with pytest.raises(SchemaError, match="source_type 'eval_only'"):
+        parse_record(
+            {
+                "id": "eval_human_source",
+                "dataset_type": "eval",
+                "prompt": "評価してください。",
+                "expected_points": ["評価観点"],
+                "provenance": provenance(source_type="human_authored"),
+            }
+        )
+
+
+@pytest.mark.parametrize("bad_point", [None, 123, ""])
+def test_eval_expected_points_must_be_non_empty_strings(bad_point: object) -> None:
+    with pytest.raises(
+        SchemaError, match="expected_points must contain only non-empty strings"
+    ):
+        parse_record(
+            {
+                "id": "eval_bad_points",
+                "dataset_type": "eval",
+                "prompt": "評価してください。",
+                "expected_points": ["妥当な観点", bad_point],
+                "provenance": provenance(source_type="eval_only"),
+            }
+        )
+
+
 def test_raw_ai_output_source_is_training_blocked() -> None:
     record = parse_record(
         {

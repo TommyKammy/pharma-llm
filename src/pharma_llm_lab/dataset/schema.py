@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
 
-from pharma_llm_lab.dataset.provenance import ProvenanceMetadata
+from pharma_llm_lab.dataset.provenance import ProvenanceMetadata, SourceType
 
 
 class SchemaError(ValueError):
@@ -55,6 +55,10 @@ def require_dataset_type(mapping: dict[str, Any], expected: DatasetType) -> None
         )
 
 
+def normalize_preference_text(value: str) -> str:
+    return " ".join(value.split())
+
+
 @dataclass(frozen=True)
 class SftRecord:
     id: str
@@ -86,11 +90,16 @@ class DpoRecord:
     @classmethod
     def from_mapping(cls, mapping: dict[str, Any]) -> "DpoRecord":
         require_dataset_type(mapping, DatasetType.DPO)
+        chosen = require_string(mapping, "chosen")
+        rejected = require_string(mapping, "rejected")
+        if normalize_preference_text(chosen) == normalize_preference_text(rejected):
+            raise SchemaError("chosen and rejected must differ")
+
         return cls(
             id=require_string(mapping, "id"),
             prompt=require_string(mapping, "prompt"),
-            chosen=require_string(mapping, "chosen"),
-            rejected=require_string(mapping, "rejected"),
+            chosen=chosen,
+            rejected=rejected,
             provenance=parse_provenance(mapping),
         )
 
@@ -127,16 +136,22 @@ class EvalRecord:
         expected_points = mapping.get("expected_points")
         if not isinstance(expected_points, list | tuple) or not expected_points:
             raise SchemaError("expected_points must be a non-empty list")
+        if any(not isinstance(point, str) or not point.strip() for point in expected_points):
+            raise SchemaError("expected_points must contain only non-empty strings")
 
         category = mapping.get("category")
         if category is not None and not isinstance(category, str):
             raise SchemaError("category must be a string when provided")
 
+        provenance = parse_provenance(mapping)
+        if provenance.source_type is not SourceType.EVAL_ONLY:
+            raise SchemaError("eval records must use source_type 'eval_only'")
+
         return cls(
             id=require_string(mapping, "id"),
             prompt=require_string(mapping, "prompt"),
-            expected_points=tuple(str(point) for point in expected_points),
-            provenance=parse_provenance(mapping),
+            expected_points=tuple(expected_points),
+            provenance=provenance,
             category=category,
         )
 
