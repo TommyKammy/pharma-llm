@@ -15,6 +15,12 @@ from pharma_llm_lab.dataset.schema import (
     SftRecord,
     parse_record,
 )
+from pharma_llm_lab.dataset.validators import (
+    ValidationError,
+    ValidationResult,
+    parse_dataset_type,
+    validate_jsonl,
+)
 
 __all__ = [
     "CptRecord",
@@ -27,5 +33,9 @@ __all__ = [
     "SchemaError",
     "SftRecord",
     "SourceType",
+    "ValidationError",
+    "ValidationResult",
+    "parse_dataset_type",
     "parse_record",
+    "validate_jsonl",
 ]
