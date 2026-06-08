@@ -116,6 +116,32 @@ def test_eval_leakage_guard_detects_exact_prompt_reuse_after_normalization(
     assert "eval prompt duplicates training prompt" in findings[0].detail
 
 
+def test_eval_leakage_guard_rejects_eval_only_training_record_without_overlap(
+    tmp_path: Path,
+) -> None:
+    eval_path = write_jsonl(tmp_path / "eval.jsonl", [eval_record()])
+    training_path = write_jsonl(
+        tmp_path / "sft.jsonl",
+        [
+            sft_record(
+                record_id="sft_eval_only_001",
+                prompt="別の学習用プロンプトです。",
+                source_type="eval_only",
+            )
+        ],
+    )
+
+    try:
+        check_eval_leakage(
+            eval_paths=(eval_path,),
+            training_paths=(training_path,),
+        )
+    except ValueError as exc:
+        assert "source_type 'eval_only' is blocked for training" in str(exc)
+    else:
+        raise AssertionError("eval_only training record was accepted")
+
+
 def test_eval_leakage_guard_cli_fails_on_prompt_leakage(tmp_path: Path) -> None:
     eval_path = write_jsonl(tmp_path / "eval.jsonl", [eval_record(prompt="漏洩入力")])
     training_path = write_jsonl(tmp_path / "sft.jsonl", [sft_record(prompt="漏洩入力")])
@@ -137,6 +163,33 @@ def test_eval_leakage_guard_cli_fails_on_prompt_leakage(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "FAILED: eval/training leakage detected" in result.stderr
     assert "duplicate_text" in result.stderr
+
+
+def test_eval_leakage_guard_cli_rejects_policy_invalid_training_input(
+    tmp_path: Path,
+) -> None:
+    eval_path = write_jsonl(tmp_path / "eval.jsonl", [eval_record()])
+    training_path = write_jsonl(
+        tmp_path / "sft.jsonl",
+        [sft_record(source_type="eval_only", prompt="重複していない入力")],
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/check_eval_leakage.py",
+            "--eval",
+            str(eval_path),
+            "--training",
+            str(training_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "source_type 'eval_only' is blocked for training" in result.stderr
 
 
 def test_eval_leakage_guard_cli_accepts_clean_inputs(tmp_path: Path) -> None:

@@ -20,6 +20,7 @@ from pharma_llm_lab.dataset import (  # noqa: E402
     parse_record,
 )
 from pharma_llm_lab.dataset.schema import SchemaError  # noqa: E402
+from pharma_llm_lab.dataset.validators import validate_record_policy  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,14 @@ def require_training_records(records: tuple[LoadedRecord, ...]) -> None:
     for record in records:
         if not isinstance(record.parsed, SftRecord | DpoRecord | CptRecord):
             raise ValueError(f"{record.location}: expected sft, dpo, or cpt record")
+        policy_errors = validate_record_policy(
+            record.parsed,
+            expected_dataset_type=record.parsed.dataset_type,
+            line_number=record.line_number,
+        )
+        if policy_errors:
+            formatted_errors = "; ".join(error.message for error in policy_errors)
+            raise ValueError(f"{record.location}: {formatted_errors}")
 
 
 def training_texts(record: LoadedRecord) -> tuple[tuple[str, str], ...]:
