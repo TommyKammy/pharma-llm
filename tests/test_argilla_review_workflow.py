@@ -181,6 +181,33 @@ def test_import_from_argilla_preserves_existing_risk_flags_when_review_omits_the
     assert imported[0]["provenance"]["risk_flags"] == ["medical_advice"]
 
 
+def test_import_from_argilla_falls_back_to_exported_risk_flags(
+    tmp_path: Path,
+) -> None:
+    candidate_path = write_jsonl(tmp_path / "candidate.jsonl", sample_records())
+    review_path = tmp_path / "review.jsonl"
+    imported_path = tmp_path / "imported.jsonl"
+    export_records(candidate_path, review_path)
+    payload = with_reviewed_fields(
+        reviewed_payload(
+            read_jsonl(review_path)[1],
+            review_status="edited_and_approved",
+            human_reviewer="reviewer_a",
+            review_date="2026-06-08",
+        ),
+        response="服薬変更は担当医療者に確認し、一般情報に限定して説明します。",
+    )
+    payload["original_record"]["provenance"]["risk_flags"] = ["tampered_flag"]
+    del payload["review"]["risk_flags"]
+    write_jsonl(review_path, [payload])
+
+    count = import_records(review_path, imported_path)
+    imported = read_jsonl(imported_path)
+
+    assert count == 1
+    assert imported[0]["provenance"]["risk_flags"] == ["medical_advice"]
+
+
 def test_import_from_argilla_clears_raw_target_flag_for_edited_ai_candidates(
     tmp_path: Path,
 ) -> None:
@@ -208,6 +235,39 @@ def test_import_from_argilla_clears_raw_target_flag_for_edited_ai_candidates(
     assert count == 1
     assert imported[0]["provenance"]["source_type"] == "human_edited_ai_assisted"
     assert not imported[0]["provenance"]["raw_ai_output_used_as_training_target"]
+
+
+def test_import_from_argilla_requires_actual_edits_for_ai_candidates(
+    tmp_path: Path,
+) -> None:
+    candidate_path = write_jsonl(tmp_path / "candidate.jsonl", sample_records())
+    review_path = tmp_path / "review.jsonl"
+    imported_path = tmp_path / "imported.jsonl"
+    export_records(candidate_path, review_path)
+    payload = reviewed_payload(
+        read_jsonl(review_path)[1],
+        review_status="edited_and_approved",
+        human_reviewer="reviewer_a",
+        review_date="2026-06-08",
+        risk_flags=["medical_advice", "edited"],
+    )
+    write_jsonl(review_path, [payload])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path("scripts/import_from_argilla.py").resolve()),
+            str(review_path),
+            str(imported_path),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "ai_candidate_unreviewed requires edited review fields" in result.stderr
 
 
 def test_import_from_argilla_rejects_approved_human_edited_ai_assisted_records(
@@ -240,6 +300,41 @@ def test_import_from_argilla_rejects_approved_human_edited_ai_assisted_records(
 
     assert result.returncode == 1
     assert "human_edited_ai_assisted requires edited_and_approved review" in result.stderr
+
+
+def test_import_from_argilla_rejects_approved_ai_assisted_records(
+    tmp_path: Path,
+) -> None:
+    record = sample_records()[0]
+    record["provenance"]["ai_assisted"] = True
+    record["provenance"]["ai_tool"] = "codex_app"
+    candidate_path = write_jsonl(tmp_path / "candidate.jsonl", [record])
+    review_path = tmp_path / "review.jsonl"
+    imported_path = tmp_path / "imported.jsonl"
+    export_records(candidate_path, review_path)
+    payload = reviewed_payload(
+        read_jsonl(review_path)[0],
+        review_status="approved",
+        human_reviewer="reviewer_a",
+        review_date="2026-06-08",
+    )
+    write_jsonl(review_path, [payload])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path("scripts/import_from_argilla.py").resolve()),
+            str(review_path),
+            str(imported_path),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "ai_assisted records require edited_and_approved review" in result.stderr
 
 
 def test_import_from_argilla_rejects_approved_unreviewed_ai_candidate(

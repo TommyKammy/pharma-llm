@@ -125,6 +125,10 @@ def merge_reviewed_fields(original_record: dict[str, Any], fields: dict[str, Any
     return imported_record
 
 
+def reviewed_fields_changed(original_record: dict[str, Any], fields: dict[str, Any]) -> bool:
+    return any(original_record.get(field_name) != value for field_name, value in fields.items())
+
+
 def validate_payload_identity(
     payload: dict[str, Any],
     *,
@@ -176,8 +180,9 @@ def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
     provenance = original_record.get("provenance")
     if not isinstance(provenance, dict):
         raise ValueError("original_record must include a provenance object")
+    exported_provenance = require_top_level_provenance(payload)
     validate_immutable_provenance(
-        exported_provenance=require_top_level_provenance(payload),
+        exported_provenance=exported_provenance,
         original_provenance=provenance,
     )
 
@@ -189,7 +194,7 @@ def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
     updated_provenance = dict(provenance)
     updated_provenance["review_status"] = review_status
     updated_provenance["risk_flags"] = require_risk_flags(
-        review.get("risk_flags", provenance.get("risk_flags", [])),
+        review.get("risk_flags", exported_provenance.get("risk_flags", [])),
         require_non_empty=review_status == ReviewStatus.RISK_FLAGGED.value,
     )
 
@@ -197,6 +202,8 @@ def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
         review_status == ReviewStatus.EDITED_AND_APPROVED.value
         and updated_provenance.get("source_type") == SourceType.AI_CANDIDATE_UNREVIEWED.value
     ):
+        if not reviewed_fields_changed(original_record, fields):
+            raise ValueError("ai_candidate_unreviewed requires edited review fields")
         updated_provenance["source_type"] = SourceType.HUMAN_EDITED_AI_ASSISTED.value
         updated_provenance["raw_ai_output_used_as_training_target"] = False
     elif (
@@ -219,6 +226,8 @@ def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
         and updated_provenance.get("source_type") == SourceType.RAW_AI_OUTPUT.value
     ):
         raise ValueError("raw_ai_output cannot be marked approved")
+    elif review_status == ReviewStatus.APPROVED.value and updated_provenance.get("ai_assisted"):
+        raise ValueError("ai_assisted records require edited_and_approved review")
 
     if review_status in REVIEWED_STATUSES_REQUIRE_METADATA:
         updated_provenance["human_reviewer"] = require_string(
