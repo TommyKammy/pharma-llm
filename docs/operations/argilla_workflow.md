@@ -137,6 +137,55 @@ make argilla-server-smoke
 
 This does not require a running server. Server-backed registration is a separate check once a local or private Argilla instance is available.
 
+## Offline Export / Import
+
+Before wiring a live Argilla server, Phase 3 uses local JSONL payloads to verify
+the review contract.
+
+Export synthetic candidates into an Argilla-friendly review payload:
+
+```bash
+uv run python scripts/export_to_argilla.py \
+  /Users/tsinfra/Dev/pharma-llm/local/argilla/phase3_review_sample.jsonl \
+  /Users/tsinfra/Dev/pharma-llm/local/argilla/phase3_review_payload.jsonl
+```
+
+The exported payload contains:
+
+- `fields`: values reviewers should inspect
+- `provenance`: Phase 2 provenance metadata preserved as-is
+- `review`: editable review fields
+- `original_record`: the full source record used for round-trip import
+
+After review, import the reviewed payload back into dataset JSONL:
+
+```bash
+uv run python scripts/import_from_argilla.py \
+  /Users/tsinfra/Dev/pharma-llm/local/argilla/phase3_review_payload.jsonl \
+  /Users/tsinfra/Dev/pharma-llm/local/argilla/phase3_reviewed_dataset.jsonl
+```
+
+Import copies reviewed `fields` back onto the dataset record, updates provenance
+review metadata, and removes the local `argilla` helper section. When an
+`ai_candidate_unreviewed` record is marked `edited_and_approved`, import changes
+`source_type` to `human_edited_ai_assisted` and clears
+`raw_ai_output_used_as_training_target` because the reviewed fields now replace
+the candidate target. An unreviewed AI candidate cannot be marked `approved`
+as-is; it must have at least one reviewed target field changed and then be
+marked `edited_and_approved`. Existing risk flags are preserved from the
+top-level exported provenance when review payloads omit `review.risk_flags`.
+Any AI-assisted record must use `edited_and_approved`, not plain `approved`, so
+the review state retains the human-edit audit signal. For SFT and DPO records,
+prompt-only edits are not enough to satisfy this requirement because the training
+target is `response`, `chosen`, or `rejected`. Raw AI output cannot be marked
+`approved` or `edited_and_approved`; it must be recreated as a
+human-edited candidate before approval. Import rejects invalid review statuses,
+unsupported reviewed field keys, missing reviewer metadata on approved records,
+empty risk flags for `risk_flagged` records, malformed risk flags, and malformed
+payloads with clear CLI errors. It also rejects payload identity mismatches,
+missing reviewed content fields, and mutations to immutable provenance fields
+between the top-level exported provenance and embedded `original_record`.
+
 `make argilla-server-smoke` checks `ARGILLA_API_URL` and `ARGILLA_API_KEY`. If no API key is set, it records a skipped result under:
 
 ```text
@@ -147,7 +196,7 @@ This does not require a running server. Server-backed registration is a separate
 
 Only records with approved review state may be exported to training datasets. AI-assisted candidates remain non-training data until human review or human editing is complete.
 
-Later phases will add:
+Phase 3 includes the offline foundations:
 
 ```text
 scripts/export_to_argilla.py
