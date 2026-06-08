@@ -792,6 +792,72 @@ def test_promote_reviewed_dataset_fails_when_no_records_are_promoted(
     assert result.skipped
 
 
+def test_promote_reviewed_dataset_skips_plain_approved_ai_assisted_records(
+    tmp_path: Path,
+) -> None:
+    ai_assisted_record = {
+        **sample_records()[0],
+        "provenance": {
+            **sample_records()[0]["provenance"],
+            "source_type": "human_edited_ai_assisted",
+            "review_status": "approved",
+            "ai_assisted": True,
+            "ai_tool": "codex_app",
+            "human_reviewer": "reviewer_a",
+            "review_date": "2026-06-08",
+        },
+    }
+    reviewed_path = write_jsonl(tmp_path / "reviewed_ai_assisted.jsonl", [ai_assisted_record])
+    prepared_path = tmp_path / "prepared_sft.jsonl"
+
+    result = promote_reviewed_dataset(
+        reviewed_path,
+        prepared_path,
+        dataset_type_value="sft",
+    )
+
+    assert not result.ok
+    assert not prepared_path.exists()
+    assert not result.promoted
+    assert result.skipped[0].id == "phase3_argilla_sample_001"
+    assert "ai_assisted records require edited_and_approved review" in result.skipped[0].reason
+
+
+def test_promote_reviewed_dataset_removes_stale_output_on_failure(
+    tmp_path: Path,
+) -> None:
+    reviewed_path = write_jsonl(tmp_path / "reviewed.jsonl", [sample_records()[0]])
+    prepared_path = tmp_path / "prepared_sft.jsonl"
+
+    first_result = promote_reviewed_dataset(
+        reviewed_path,
+        prepared_path,
+        dataset_type_value="sft",
+    )
+    bad_reviewed_path = write_jsonl(
+        tmp_path / "reviewed_skipped.jsonl",
+        [
+            {
+                **sample_records()[4],
+                "provenance": {
+                    **sample_records()[4]["provenance"],
+                    "review_status": "rejected",
+                },
+            }
+        ],
+    )
+
+    second_result = promote_reviewed_dataset(
+        bad_reviewed_path,
+        prepared_path,
+        dataset_type_value="sft",
+    )
+
+    assert first_result.ok
+    assert not second_result.ok
+    assert not prepared_path.exists()
+
+
 def test_promote_reviewed_dataset_cli_writes_audit_summary(
     tmp_path: Path,
 ) -> None:
@@ -824,6 +890,34 @@ def test_promote_reviewed_dataset_cli_writes_audit_summary(
     assert audit["promoted"] == 1
     assert audit["skipped"] == 0
     assert audit["failed"] == 0
+
+
+def test_promote_reviewed_dataset_cli_rejects_audit_output_collision(
+    tmp_path: Path,
+) -> None:
+    reviewed_path = write_jsonl(tmp_path / "reviewed.jsonl", [sample_records()[0]])
+    prepared_path = tmp_path / "prepared_sft.jsonl"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path("scripts/promote_reviewed_dataset.py").resolve()),
+            "--dataset-type",
+            "sft",
+            "--audit-output",
+            str(prepared_path),
+            str(reviewed_path),
+            str(prepared_path),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "--audit-output must not be the same path as output" in result.stderr
+    assert not prepared_path.exists()
 
 
 def test_promote_reviewed_dataset_rejects_eval_dataset_type(tmp_path: Path) -> None:

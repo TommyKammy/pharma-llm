@@ -14,6 +14,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from pharma_llm_lab.dataset.schema import SchemaError, parse_record  # noqa: E402
+from pharma_llm_lab.dataset.provenance import ReviewStatus  # noqa: E402
 from pharma_llm_lab.dataset.validators import (  # noqa: E402
     ValidationError,
     parse_dataset_type,
@@ -81,6 +82,11 @@ def format_policy_errors(errors: list[ValidationError]) -> str:
     return "; ".join(error.message for error in errors)
 
 
+def remove_stale_output(path: Path) -> None:
+    if path.is_file():
+        path.unlink()
+
+
 def parse_training_dataset_type(value: str) -> str:
     dataset_type = parse_dataset_type(value)
     if dataset_type.value not in TRAINING_DATASET_TYPES:
@@ -91,6 +97,19 @@ def parse_training_dataset_type(value: str) -> str:
 
 def prepared_record(raw_record: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in raw_record.items() if key != "argilla"}
+
+
+def review_workflow_policy_failure(record: Any) -> str | None:
+    if (
+        record.provenance.ai_assisted
+        and record.provenance.review_status is ReviewStatus.APPROVED
+    ):
+        return "ai_assisted records require edited_and_approved review"
+    return None
+
+
+def paths_collide(left: Path, right: Path) -> bool:
+    return left.expanduser().resolve() == right.expanduser().resolve()
 
 
 def evaluate_promotion(
@@ -168,6 +187,17 @@ def evaluate_promotion(
             )
             continue
 
+        review_policy_failure = review_workflow_policy_failure(record)
+        if review_policy_failure:
+            skipped.append(
+                PromotionAuditEntry(
+                    id=current_id,
+                    status="skipped",
+                    reason=review_policy_failure,
+                )
+            )
+            continue
+
         promoted_records.append(prepared_record(raw_record))
         promoted.append(
             PromotionAuditEntry(
@@ -201,6 +231,7 @@ def promote_reviewed_dataset(
 ) -> PromotionResult:
     result = evaluate_promotion(input_path, dataset_type_value=dataset_type_value)
     if not result.ok:
+        remove_stale_output(output_path)
         return result
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -218,6 +249,7 @@ def promote_reviewed_dataset(
     validation = validate_jsonl(temp_path, parse_dataset_type(dataset_type_value))
     if not validation.ok:
         temp_path.unlink(missing_ok=True)
+        remove_stale_output(output_path)
         failed = tuple(result.failed) + tuple(
             PromotionAuditEntry(
                 id=str(temp_path),
@@ -259,6 +291,9 @@ def main(argv: list[str] | None = None) -> int:
         parse_training_dataset_type(args.dataset_type)
     except ValueError as exc:
         parser.error(str(exc))
+
+    if args.audit_output and paths_collide(args.audit_output, args.output):
+        parser.error("--audit-output must not be the same path as output")
 
     result = promote_reviewed_dataset(
         args.input,
