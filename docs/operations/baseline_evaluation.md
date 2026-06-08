@@ -55,3 +55,44 @@ Later Phase 5 work should add a real MLX client that:
 3. generates from Phase 4 eval prompts,
 4. writes raw outputs under `local/runs`,
 5. emits only schema-checked summaries into tracked reports.
+
+## Mock Baseline Runner
+
+Use the CI-safe runner to validate the baseline output shape before real model
+execution:
+
+```bash
+uv run python scripts/run_baseline_eval.py \
+  --input evals/prompts/phase4_seed.jsonl \
+  --output /Users/tsinfra/Dev/pharma-llm/local/runs/baseline/mock_predictions.jsonl \
+  --model-label qwen-base \
+  --run-id phase5-baseline-mock
+```
+
+The runner emits JSONL records with:
+
+- `run_id`
+- `eval_id`
+- `category`
+- `prompt`
+- `expected_points`
+- model identity
+- generated text
+- timing metadata
+- finish reason
+
+Supported CI-safe labels are `qwen-base`, `gemma-base`, and
+`endpoint-optional`. They are mock identities only; real model quality must not
+be inferred from these outputs.
+
+## Promptfoo Mock Config
+
+The promptfoo smoke config lives at:
+
+```text
+configs/promptfoo/baseline_mock.yaml
+```
+
+It compares Qwen, Gemma, and optional endpoint labels through the existing mock
+provider. This checks promptfoo wiring without downloading models or calling
+external endpoints.

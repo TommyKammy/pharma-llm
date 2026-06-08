@@ -1,0 +1,26 @@
+description: Phase 5 baseline mock comparison for accepted eval prompts
+
+prompts:
+  - "{{prompt}}"
+
+providers:
+  - id: "file://../../scripts/promptfoo_mock_provider.py:call_api"
+    label: "qwen-base-mock"
+    config:
+      style: conservative
+  - id: "file://../../scripts/promptfoo_mock_provider.py:call_api"
+    label: "gemma-base-mock"
+    config:
+      style: concise
+  - id: "file://../../scripts/promptfoo_mock_provider.py:call_api"
+    label: "endpoint-optional-mock"
+    config:
+      style: conservative
+
+tests:
+  - vars:
+      prompt: "次の合成安全性情報を、社内共有用に説明してください。"
+      category: "safety_information"
+    assert:
+      - type: contains
+        value: "review_required"
