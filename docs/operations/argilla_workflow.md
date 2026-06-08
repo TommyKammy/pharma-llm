@@ -171,12 +171,14 @@ review metadata, and removes the local `argilla` helper section. When an
 `source_type` to `human_edited_ai_assisted` and clears
 `raw_ai_output_used_as_training_target` because the reviewed fields now replace
 the candidate target. An unreviewed AI candidate cannot be marked `approved`
-as-is; it must have at least one reviewed content field changed and then be
+as-is; it must have at least one reviewed target field changed and then be
 marked `edited_and_approved`. Existing risk flags are preserved from the
 top-level exported provenance when review payloads omit `review.risk_flags`.
 Any AI-assisted record must use `edited_and_approved`, not plain `approved`, so
-the review state retains the human-edit audit signal. Raw AI output cannot be
-marked `approved` or `edited_and_approved`; it must be recreated as a
+the review state retains the human-edit audit signal. For SFT and DPO records,
+prompt-only edits are not enough to satisfy this requirement because the training
+target is `response`, `chosen`, or `rejected`. Raw AI output cannot be marked
+`approved` or `edited_and_approved`; it must be recreated as a
 human-edited candidate before approval. Import rejects invalid review statuses,
 unsupported reviewed field keys, missing reviewer metadata on approved records,
 empty risk flags for `risk_flagged` records, malformed risk flags, and malformed

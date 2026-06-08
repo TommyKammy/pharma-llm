@@ -267,7 +267,43 @@ def test_import_from_argilla_requires_actual_edits_for_ai_candidates(
     )
 
     assert result.returncode == 1
-    assert "ai_candidate_unreviewed requires edited review fields" in result.stderr
+    assert "ai_candidate_unreviewed requires edited target fields" in result.stderr
+
+
+def test_import_from_argilla_rejects_prompt_only_edits_for_ai_candidates(
+    tmp_path: Path,
+) -> None:
+    candidate_path = write_jsonl(tmp_path / "candidate.jsonl", sample_records())
+    review_path = tmp_path / "review.jsonl"
+    imported_path = tmp_path / "imported.jsonl"
+    export_records(candidate_path, review_path)
+    payload = with_reviewed_fields(
+        reviewed_payload(
+            read_jsonl(review_path)[1],
+            review_status="edited_and_approved",
+            human_reviewer="reviewer_a",
+            review_date="2026-06-08",
+            risk_flags=["medical_advice", "edited"],
+        ),
+        prompt="患者向け服薬相談への回答方針を確認してください。",
+    )
+    write_jsonl(review_path, [payload])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path("scripts/import_from_argilla.py").resolve()),
+            str(review_path),
+            str(imported_path),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "ai_candidate_unreviewed requires edited target fields" in result.stderr
 
 
 def test_import_from_argilla_rejects_approved_human_edited_ai_assisted_records(
@@ -335,6 +371,44 @@ def test_import_from_argilla_rejects_approved_ai_assisted_records(
 
     assert result.returncode == 1
     assert "ai_assisted records require edited_and_approved review" in result.stderr
+
+
+def test_import_from_argilla_rejects_unedited_ai_assisted_edited_approval(
+    tmp_path: Path,
+) -> None:
+    record = sample_records()[0]
+    record["provenance"]["ai_assisted"] = True
+    record["provenance"]["ai_tool"] = "codex_app"
+    candidate_path = write_jsonl(tmp_path / "candidate.jsonl", [record])
+    review_path = tmp_path / "review.jsonl"
+    imported_path = tmp_path / "imported.jsonl"
+    export_records(candidate_path, review_path)
+    payload = reviewed_payload(
+        read_jsonl(review_path)[0],
+        review_status="edited_and_approved",
+        human_reviewer="reviewer_a",
+        review_date="2026-06-08",
+    )
+    write_jsonl(review_path, [payload])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path("scripts/import_from_argilla.py").resolve()),
+            str(review_path),
+            str(imported_path),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "edited_and_approved ai_assisted records require edited target fields"
+        in result.stderr
+    )
 
 
 def test_import_from_argilla_rejects_approved_unreviewed_ai_candidate(

@@ -32,6 +32,12 @@ REVIEW_FIELD_NAMES_BY_DATASET_TYPE = {
     "cpt": frozenset({"text"}),
     "eval": frozenset({"prompt", "expected_points"}),
 }
+REVIEW_TARGET_FIELD_NAMES_BY_DATASET_TYPE = {
+    "sft": frozenset({"response"}),
+    "dpo": frozenset({"chosen", "rejected"}),
+    "cpt": frozenset({"text"}),
+    "eval": frozenset({"expected_points"}),
+}
 REVIEW_MUTABLE_PROVENANCE_FIELDS = {
     "review_status",
     "human_reviewer",
@@ -91,6 +97,16 @@ def expected_review_field_names(original_record: dict[str, Any]) -> frozenset[st
         ) from exc
 
 
+def expected_review_target_field_names(original_record: dict[str, Any]) -> frozenset[str]:
+    dataset_type = original_record.get("dataset_type")
+    try:
+        return REVIEW_TARGET_FIELD_NAMES_BY_DATASET_TYPE[str(dataset_type)]
+    except KeyError as exc:
+        raise ValueError(
+            f"unsupported dataset_type for reviewed target fields: {dataset_type!r}"
+        ) from exc
+
+
 def require_fields_mapping(
     payload: dict[str, Any],
     *,
@@ -125,8 +141,14 @@ def merge_reviewed_fields(original_record: dict[str, Any], fields: dict[str, Any
     return imported_record
 
 
-def reviewed_fields_changed(original_record: dict[str, Any], fields: dict[str, Any]) -> bool:
-    return any(original_record.get(field_name) != value for field_name, value in fields.items())
+def reviewed_target_fields_changed(
+    original_record: dict[str, Any],
+    fields: dict[str, Any],
+) -> bool:
+    return any(
+        original_record.get(field_name) != fields[field_name]
+        for field_name in expected_review_target_field_names(original_record)
+    )
 
 
 def validate_payload_identity(
@@ -202,8 +224,8 @@ def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
         review_status == ReviewStatus.EDITED_AND_APPROVED.value
         and updated_provenance.get("source_type") == SourceType.AI_CANDIDATE_UNREVIEWED.value
     ):
-        if not reviewed_fields_changed(original_record, fields):
-            raise ValueError("ai_candidate_unreviewed requires edited review fields")
+        if not reviewed_target_fields_changed(original_record, fields):
+            raise ValueError("ai_candidate_unreviewed requires edited target fields")
         updated_provenance["source_type"] = SourceType.HUMAN_EDITED_AI_ASSISTED.value
         updated_provenance["raw_ai_output_used_as_training_target"] = False
     elif (
@@ -228,6 +250,13 @@ def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("raw_ai_output cannot be marked approved")
     elif review_status == ReviewStatus.APPROVED.value and updated_provenance.get("ai_assisted"):
         raise ValueError("ai_assisted records require edited_and_approved review")
+
+    if (
+        review_status == ReviewStatus.EDITED_AND_APPROVED.value
+        and updated_provenance.get("ai_assisted")
+        and not reviewed_target_fields_changed(original_record, fields)
+    ):
+        raise ValueError("edited_and_approved ai_assisted records require edited target fields")
 
     if review_status in REVIEWED_STATUSES_REQUIRE_METADATA:
         updated_provenance["human_reviewer"] = require_string(
