@@ -175,7 +175,9 @@ Raw AI output cannot be marked `edited_and_approved`; it must be recreated as a
 human-edited candidate before approval. Import rejects invalid review statuses,
 unsupported reviewed field keys, missing reviewer metadata on approved records,
 empty risk flags for `risk_flagged` records, malformed risk flags, and malformed
-payloads with clear CLI errors.
+payloads with clear CLI errors. It also rejects payload identity mismatches,
+missing reviewed content fields, and mutations to immutable provenance fields
+between the top-level exported provenance and embedded `original_record`.
 
 `make argilla-server-smoke` checks `ARGILLA_API_URL` and `ARGILLA_API_KEY`. If no API key is set, it records a skipped result under:
 

@@ -32,6 +32,12 @@ REVIEW_FIELD_NAMES_BY_DATASET_TYPE = {
     "cpt": frozenset({"text"}),
     "eval": frozenset({"prompt", "expected_points"}),
 }
+REVIEW_MUTABLE_PROVENANCE_FIELDS = {
+    "review_status",
+    "human_reviewer",
+    "review_date",
+    "risk_flags",
+}
 
 
 def iter_jsonl(path: Path) -> Iterable[tuple[int, dict[str, Any]]]:
@@ -95,10 +101,16 @@ def require_fields_mapping(
         raise ValueError("review payload must include a non-empty fields object")
     allowed_fields = expected_review_field_names(original_record)
     unexpected_fields = sorted(set(fields) - allowed_fields)
+    missing_fields = sorted(allowed_fields - set(fields))
     if unexpected_fields:
         raise ValueError(
             "review fields contain unsupported key(s): "
             + ", ".join(repr(field) for field in unexpected_fields)
+        )
+    if missing_fields:
+        raise ValueError(
+            "review fields are missing required key(s): "
+            + ", ".join(repr(field) for field in missing_fields)
         )
     return fields
 
@@ -113,21 +125,66 @@ def merge_reviewed_fields(original_record: dict[str, Any], fields: dict[str, Any
     return imported_record
 
 
+def validate_payload_identity(
+    payload: dict[str, Any],
+    *,
+    original_record: dict[str, Any],
+) -> None:
+    for field_name in ("id", "dataset_type"):
+        if payload.get(field_name) != original_record.get(field_name):
+            raise ValueError(
+                f"payload {field_name} does not match original_record {field_name}"
+            )
+
+
+def require_top_level_provenance(payload: dict[str, Any]) -> dict[str, Any]:
+    provenance = payload.get("provenance")
+    if not isinstance(provenance, dict):
+        raise ValueError("review payload must include a provenance object")
+    return provenance
+
+
+def validate_immutable_provenance(
+    *,
+    exported_provenance: dict[str, Any],
+    original_provenance: dict[str, Any],
+) -> None:
+    keys = sorted(set(exported_provenance) | set(original_provenance))
+    mismatched_fields = [
+        key
+        for key in keys
+        if key not in REVIEW_MUTABLE_PROVENANCE_FIELDS
+        and exported_provenance.get(key) != original_provenance.get(key)
+    ]
+    if mismatched_fields:
+        raise ValueError(
+            "original_record provenance does not match exported provenance for "
+            "immutable field(s): "
+            + ", ".join(repr(field) for field in mismatched_fields)
+        )
+
+
 def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
     original_record = payload.get("original_record")
     if not isinstance(original_record, dict):
         raise ValueError("review payload must include an original_record object")
 
+    validate_payload_identity(payload, original_record=original_record)
     review = require_review_mapping(payload)
     fields = require_fields_mapping(payload, original_record=original_record)
-    review_status = require_string(review.get("review_status"), "review_status")
-    if review_status not in SUPPORTED_REVIEW_STATUSES:
-        allowed = ", ".join(sorted(SUPPORTED_REVIEW_STATUSES))
-        raise ValueError(f"invalid review_status {review_status!r}; expected one of: {allowed}")
 
     provenance = original_record.get("provenance")
     if not isinstance(provenance, dict):
         raise ValueError("original_record must include a provenance object")
+    validate_immutable_provenance(
+        exported_provenance=require_top_level_provenance(payload),
+        original_provenance=provenance,
+    )
+
+    review_status = require_string(review.get("review_status"), "review_status")
+    if review_status not in SUPPORTED_REVIEW_STATUSES:
+        allowed = ", ".join(sorted(SUPPORTED_REVIEW_STATUSES))
+        raise ValueError(f"invalid review_status {review_status!r}; expected one of: {allowed}")
 
     updated_provenance = dict(provenance)
     updated_provenance["review_status"] = review_status

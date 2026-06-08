@@ -214,6 +214,94 @@ def test_import_from_argilla_requires_risk_flags_for_risk_flagged_reviews(
     assert "risk_flagged reviews must include at least one risk flag" in result.stderr
 
 
+def test_import_from_argilla_rejects_mismatched_payload_identity(
+    tmp_path: Path,
+) -> None:
+    candidate_path = write_jsonl(tmp_path / "candidate.jsonl", sample_records())
+    review_path = tmp_path / "review.jsonl"
+    imported_path = tmp_path / "imported.jsonl"
+    export_records(candidate_path, review_path)
+    payload = read_jsonl(review_path)[0]
+    payload["id"] = "wrong_review_row"
+    write_jsonl(review_path, [payload])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path("scripts/import_from_argilla.py").resolve()),
+            str(review_path),
+            str(imported_path),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "payload id does not match original_record id" in result.stderr
+
+
+def test_import_from_argilla_rejects_mutated_immutable_provenance(
+    tmp_path: Path,
+) -> None:
+    candidate_path = write_jsonl(tmp_path / "candidate.jsonl", sample_records())
+    review_path = tmp_path / "review.jsonl"
+    imported_path = tmp_path / "imported.jsonl"
+    export_records(candidate_path, review_path)
+    payload = read_jsonl(review_path)[4]
+    payload["original_record"]["provenance"]["raw_ai_output_used_as_training_target"] = False
+    write_jsonl(review_path, [payload])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path("scripts/import_from_argilla.py").resolve()),
+            str(review_path),
+            str(imported_path),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "original_record provenance does not match exported provenance"
+        in result.stderr
+    )
+    assert "raw_ai_output_used_as_training_target" in result.stderr
+
+
+def test_import_from_argilla_rejects_missing_review_fields(
+    tmp_path: Path,
+) -> None:
+    candidate_path = write_jsonl(tmp_path / "candidate.jsonl", sample_records())
+    review_path = tmp_path / "review.jsonl"
+    imported_path = tmp_path / "imported.jsonl"
+    export_records(candidate_path, review_path)
+    payload = read_jsonl(review_path)[1]
+    del payload["fields"]["response"]
+    write_jsonl(review_path, [payload])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path("scripts/import_from_argilla.py").resolve()),
+            str(review_path),
+            str(imported_path),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "review fields are missing required key(s): 'response'" in result.stderr
+
+
 def test_import_from_argilla_rejects_invalid_review_status(tmp_path: Path) -> None:
     candidate_path = write_jsonl(tmp_path / "candidate.jsonl", sample_records())
     review_path = tmp_path / "review.jsonl"
