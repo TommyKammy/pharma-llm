@@ -11,7 +11,7 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from pharma_llm_lab.dataset.provenance import ReviewStatus  # noqa: E402
+from pharma_llm_lab.dataset.provenance import ReviewStatus, SourceType  # noqa: E402
 from pharma_llm_lab.dataset.schema import parse_record  # noqa: E402
 
 SUPPORTED_REVIEW_STATUSES = {
@@ -65,12 +65,30 @@ def require_risk_flags(value: Any) -> list[str]:
     return value
 
 
+def require_fields_mapping(payload: dict[str, Any]) -> dict[str, Any]:
+    fields = payload.get("fields")
+    if not isinstance(fields, dict) or not fields:
+        raise ValueError("review payload must include a non-empty fields object")
+    return fields
+
+
+def merge_reviewed_fields(original_record: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
+    imported_record = {
+        key: value
+        for key, value in original_record.items()
+        if key != "argilla"
+    }
+    imported_record.update(fields)
+    return imported_record
+
+
 def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
     original_record = payload.get("original_record")
     if not isinstance(original_record, dict):
         raise ValueError("review payload must include an original_record object")
 
     review = require_review_mapping(payload)
+    fields = require_fields_mapping(payload)
     review_status = require_string(review.get("review_status"), "review_status")
     if review_status not in SUPPORTED_REVIEW_STATUSES:
         allowed = ", ".join(sorted(SUPPORTED_REVIEW_STATUSES))
@@ -84,6 +102,17 @@ def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
     updated_provenance["review_status"] = review_status
     updated_provenance["risk_flags"] = require_risk_flags(review.get("risk_flags", []))
 
+    if (
+        review_status == ReviewStatus.EDITED_AND_APPROVED.value
+        and updated_provenance.get("source_type") == SourceType.AI_CANDIDATE_UNREVIEWED.value
+    ):
+        updated_provenance["source_type"] = SourceType.HUMAN_EDITED_AI_ASSISTED.value
+    elif (
+        review_status == ReviewStatus.EDITED_AND_APPROVED.value
+        and updated_provenance.get("source_type") == SourceType.RAW_AI_OUTPUT.value
+    ):
+        raise ValueError("raw_ai_output cannot be marked edited_and_approved")
+
     if review_status in REVIEWED_STATUSES_REQUIRE_METADATA:
         updated_provenance["human_reviewer"] = require_string(
             review.get("human_reviewer"), "human_reviewer"
@@ -95,11 +124,7 @@ def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
         updated_provenance["human_reviewer"] = review.get("human_reviewer")
         updated_provenance["review_date"] = review.get("review_date")
 
-    imported_record = {
-        key: value
-        for key, value in original_record.items()
-        if key != "argilla"
-    }
+    imported_record = merge_reviewed_fields(original_record, fields)
     imported_record["provenance"] = updated_provenance
     parse_record(imported_record)
     return imported_record

@@ -165,10 +165,15 @@ uv run python scripts/import_from_argilla.py \
   /Users/tsinfra/Dev/pharma-llm/local/argilla/phase3_reviewed_dataset.jsonl
 ```
 
-Import updates only provenance review metadata and removes the local `argilla`
-helper section from the dataset record. It rejects invalid review statuses,
-missing reviewer metadata on approved records, malformed risk flags, and malformed
-payloads with clear CLI errors.
+Import copies reviewed `fields` back onto the dataset record, updates provenance
+review metadata, and removes the local `argilla` helper section. When an
+`ai_candidate_unreviewed` record is marked `edited_and_approved`, import changes
+`source_type` to `human_edited_ai_assisted` so later promotion can distinguish
+human-edited AI-assisted data from unreviewed candidates. Raw AI output cannot be
+marked `edited_and_approved`; it must be recreated as a human-edited candidate
+before approval. Import rejects invalid review statuses, missing reviewer metadata
+on approved records, malformed risk flags, and malformed payloads with clear CLI
+errors.
 
 `make argilla-server-smoke` checks `ARGILLA_API_URL` and `ARGILLA_API_KEY`. If no API key is set, it records a skipped result under:
 

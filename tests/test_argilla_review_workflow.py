@@ -30,6 +30,15 @@ def reviewed_payload(payload: dict[str, object], **review_updates: object) -> di
     return {**payload, "review": review}
 
 
+def with_reviewed_fields(
+    payload: dict[str, object],
+    **field_updates: object,
+) -> dict[str, object]:
+    fields = dict(payload["fields"])  # type: ignore[arg-type]
+    fields.update(field_updates)
+    return {**payload, "fields": fields}
+
+
 def test_export_to_argilla_preserves_review_payload_shape(tmp_path: Path) -> None:
     input_path = write_jsonl(tmp_path / "candidate.jsonl", sample_records())
     output_path = tmp_path / "review.jsonl"
@@ -54,13 +63,16 @@ def test_import_from_argilla_applies_review_metadata(tmp_path: Path) -> None:
     imported_path = tmp_path / "imported.jsonl"
     export_records(candidate_path, review_path)
     payload = read_jsonl(review_path)[1]
-    reviewed = reviewed_payload(
-        payload,
-        review_status="edited_and_approved",
-        human_reviewer="reviewer_a",
-        review_date="2026-06-08",
-        risk_flags=["medical_advice", "edited"],
-        review_notes="Synthetic candidate was edited before approval.",
+    reviewed = with_reviewed_fields(
+        reviewed_payload(
+            payload,
+            review_status="edited_and_approved",
+            human_reviewer="reviewer_a",
+            review_date="2026-06-08",
+            risk_flags=["medical_advice", "edited"],
+            review_notes="Synthetic candidate was edited before approval.",
+        ),
+        response="服薬変更は担当医療者に確認し、一般情報に限定して説明します。",
     )
     write_jsonl(review_path, [reviewed])
 
@@ -70,10 +82,44 @@ def test_import_from_argilla_applies_review_metadata(tmp_path: Path) -> None:
     assert count == 1
     assert "argilla" not in imported[0]
     assert imported[0]["id"] == "phase3_argilla_sample_002"
+    assert imported[0]["response"] == "服薬変更は担当医療者に確認し、一般情報に限定して説明します。"
+    assert imported[0]["provenance"]["source_type"] == "human_edited_ai_assisted"
     assert imported[0]["provenance"]["review_status"] == "edited_and_approved"
     assert imported[0]["provenance"]["human_reviewer"] == "reviewer_a"
     assert imported[0]["provenance"]["review_date"] == "2026-06-08"
     assert imported[0]["provenance"]["risk_flags"] == ["medical_advice", "edited"]
+
+
+def test_import_from_argilla_rejects_raw_ai_output_edited_approval(
+    tmp_path: Path,
+) -> None:
+    candidate_path = write_jsonl(tmp_path / "candidate.jsonl", sample_records())
+    review_path = tmp_path / "review.jsonl"
+    imported_path = tmp_path / "imported.jsonl"
+    export_records(candidate_path, review_path)
+    payload = reviewed_payload(
+        read_jsonl(review_path)[4],
+        review_status="edited_and_approved",
+        human_reviewer="reviewer_a",
+        review_date="2026-06-08",
+    )
+    write_jsonl(review_path, [payload])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path("scripts/import_from_argilla.py").resolve()),
+            str(review_path),
+            str(imported_path),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "raw_ai_output cannot be marked edited_and_approved" in result.stderr
 
 
 def test_import_from_argilla_rejects_invalid_review_status(tmp_path: Path) -> None:
