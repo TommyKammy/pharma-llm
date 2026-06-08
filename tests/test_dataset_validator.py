@@ -100,6 +100,7 @@ def test_validate_jsonl_rejects_eval_leakage_in_training_dataset(
     record = {
         "id": "eval_001",
         "dataset_type": "eval",
+        "category": "unsafe_refusal",
         "prompt": "評価してください。",
         "expected_points": ["拒否すべき"],
         "provenance": provenance(source_type="eval_only"),
