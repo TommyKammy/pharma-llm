@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -97,13 +98,10 @@ def eval_id(number: int) -> str:
 
 
 def eval_id_number(record_id: str) -> int:
-    prefix = "eval_"
-    if not record_id.startswith(prefix):
+    match = re.fullmatch(r"eval_(\d{3})", record_id)
+    if match is None:
         raise ValueError(f"invalid eval id: {record_id}")
-    try:
-        return int(record_id.removeprefix(prefix))
-    except ValueError as exc:
-        raise ValueError(f"invalid eval id: {record_id}") from exc
+    return int(match.group(1))
 
 
 def load_accepted_records(manifest: ExpansionManifest, *, repo_root: Path) -> tuple[EvalRecord, ...]:
@@ -307,6 +305,9 @@ def main(argv: list[str] | None = None) -> int:
     if not args.write_candidates:
         print(format_coverage_report(manifest))
         return 0
+
+    if args.write_candidates.exists():
+        parser.error(f"candidate output already exists: {args.write_candidates}")
 
     candidates = propose_candidate_records(manifest, per_category=args.per_category)
     args.write_candidates.parent.mkdir(parents=True, exist_ok=True)

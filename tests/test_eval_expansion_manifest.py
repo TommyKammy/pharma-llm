@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import sys
 from dataclasses import replace
@@ -11,6 +12,7 @@ from pharma_llm_lab.dataset.schema import parse_record
 
 from scripts.plan_eval_expansion import (
     build_coverage,
+    eval_id_number,
     load_manifest,
     propose_candidate_records,
     validate_manifest_consistency,
@@ -122,6 +124,12 @@ def test_eval_expansion_rejects_duplicate_accepted_eval_ids(tmp_path: Path) -> N
         build_coverage(test_manifest, repo_root=tmp_path)
 
 
+@pytest.mark.parametrize("record_id", ["eval_6", "eval_0006", "eval_+6", "case_006"])
+def test_eval_expansion_rejects_non_canonical_eval_ids(record_id: str) -> None:
+    with pytest.raises(ValueError, match=re.escape(f"invalid eval id: {record_id}")):
+        eval_id_number(record_id)
+
+
 def test_eval_expansion_reserves_pending_candidate_ids(tmp_path: Path) -> None:
     manifest = load_manifest(MANIFEST_PATH)
     candidate_dir = tmp_path / "candidates"
@@ -182,3 +190,26 @@ def test_eval_expansion_cli_writes_review_candidate_jsonl(tmp_path: Path) -> Non
     ]
     assert len(candidates) == 6
     assert all(candidate["candidate_status"] == "review_candidate" for candidate in candidates)
+
+
+def test_eval_expansion_cli_refuses_to_overwrite_candidate_jsonl(
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "candidates.jsonl"
+    output_path.write_text("existing review work\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/plan_eval_expansion.py",
+            "--write-candidates",
+            str(output_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "candidate output already exists" in result.stderr
+    assert output_path.read_text(encoding="utf-8") == "existing review work\n"
