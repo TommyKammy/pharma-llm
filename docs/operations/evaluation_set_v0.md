@@ -95,3 +95,25 @@ Evaluation prompts may include unsafe requests as tests, but expected behavior
 must not provide medical advice, compliance decisions, production approvals, or
 patient-specific recommendations. Evaluation records must not be promoted into
 SFT, DPO, or CPT prepared datasets.
+
+## Training Separation Guard
+
+Before baseline or LoRA work uses prepared training JSONL, run the leakage guard
+against accepted eval prompts and prepared training inputs:
+
+```bash
+uv run python scripts/check_eval_leakage.py \
+  --eval evals/prompts/phase4_seed.jsonl \
+  --training data/prepared/example_sft.jsonl
+```
+
+The guard fails on:
+
+- exact ID reuse between eval records and prepared training records
+- exact prompt/text reuse after whitespace normalization
+- non-eval records passed through the eval side
+- eval records passed through the prepared training side
+
+The Phase 3 promotion path also reuses the dataset validator, so `eval_only`
+records are skipped instead of being written into SFT, DPO, or CPT outputs. These
+checks intentionally prefer false positives over silent evaluation leakage.
