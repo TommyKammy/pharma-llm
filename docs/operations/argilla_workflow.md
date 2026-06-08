@@ -169,11 +169,13 @@ Import copies reviewed `fields` back onto the dataset record, updates provenance
 review metadata, and removes the local `argilla` helper section. When an
 `ai_candidate_unreviewed` record is marked `edited_and_approved`, import changes
 `source_type` to `human_edited_ai_assisted` so later promotion can distinguish
-human-edited AI-assisted data from unreviewed candidates. Raw AI output cannot be
-marked `edited_and_approved`; it must be recreated as a human-edited candidate
-before approval. Import rejects invalid review statuses, missing reviewer metadata
-on approved records, malformed risk flags, and malformed payloads with clear CLI
-errors.
+human-edited AI-assisted data from unreviewed candidates. An unreviewed AI
+candidate cannot be marked `approved` as-is; it must be edited and approved.
+Raw AI output cannot be marked `edited_and_approved`; it must be recreated as a
+human-edited candidate before approval. Import rejects invalid review statuses,
+unsupported reviewed field keys, missing reviewer metadata on approved records,
+empty risk flags for `risk_flagged` records, malformed risk flags, and malformed
+payloads with clear CLI errors.
 
 `make argilla-server-smoke` checks `ARGILLA_API_URL` and `ARGILLA_API_KEY`. If no API key is set, it records a skipped result under:
 

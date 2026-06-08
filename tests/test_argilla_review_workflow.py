@@ -122,6 +122,98 @@ def test_import_from_argilla_rejects_raw_ai_output_edited_approval(
     assert "raw_ai_output cannot be marked edited_and_approved" in result.stderr
 
 
+def test_import_from_argilla_rejects_approved_unreviewed_ai_candidate(
+    tmp_path: Path,
+) -> None:
+    candidate_path = write_jsonl(tmp_path / "candidate.jsonl", sample_records())
+    review_path = tmp_path / "review.jsonl"
+    imported_path = tmp_path / "imported.jsonl"
+    export_records(candidate_path, review_path)
+    payload = reviewed_payload(
+        read_jsonl(review_path)[1],
+        review_status="approved",
+        human_reviewer="reviewer_a",
+        review_date="2026-06-08",
+    )
+    write_jsonl(review_path, [payload])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path("scripts/import_from_argilla.py").resolve()),
+            str(review_path),
+            str(imported_path),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "ai_candidate_unreviewed requires edited_and_approved review" in result.stderr
+
+
+def test_import_from_argilla_rejects_unexpected_review_field_keys(
+    tmp_path: Path,
+) -> None:
+    candidate_path = write_jsonl(tmp_path / "candidate.jsonl", sample_records())
+    review_path = tmp_path / "review.jsonl"
+    imported_path = tmp_path / "imported.jsonl"
+    export_records(candidate_path, review_path)
+    payload = with_reviewed_fields(read_jsonl(review_path)[0], id="corrupted_id")
+    write_jsonl(review_path, [payload])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path("scripts/import_from_argilla.py").resolve()),
+            str(review_path),
+            str(imported_path),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "review fields contain unsupported key(s): 'id'" in result.stderr
+
+
+def test_import_from_argilla_requires_risk_flags_for_risk_flagged_reviews(
+    tmp_path: Path,
+) -> None:
+    candidate_path = write_jsonl(tmp_path / "candidate.jsonl", sample_records())
+    review_path = tmp_path / "review.jsonl"
+    imported_path = tmp_path / "imported.jsonl"
+    export_records(candidate_path, review_path)
+    payload = reviewed_payload(
+        read_jsonl(review_path)[0],
+        review_status="risk_flagged",
+        human_reviewer="reviewer_a",
+        review_date="2026-06-08",
+        risk_flags=[],
+    )
+    write_jsonl(review_path, [payload])
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path("scripts/import_from_argilla.py").resolve()),
+            str(review_path),
+            str(imported_path),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "risk_flagged reviews must include at least one risk flag" in result.stderr
+
+
 def test_import_from_argilla_rejects_invalid_review_status(tmp_path: Path) -> None:
     candidate_path = write_jsonl(tmp_path / "candidate.jsonl", sample_records())
     review_path = tmp_path / "review.jsonl"
@@ -155,7 +247,7 @@ def test_import_from_argilla_requires_reviewer_for_approved_records(
     imported_path = tmp_path / "imported.jsonl"
     export_records(candidate_path, review_path)
     payload = reviewed_payload(
-        read_jsonl(review_path)[1],
+        read_jsonl(review_path)[0],
         review_status="approved",
         human_reviewer=None,
         review_date="2026-06-08",

@@ -26,6 +26,12 @@ REVIEWED_STATUSES_REQUIRE_METADATA = {
     ReviewStatus.EDITED_AND_APPROVED.value,
     ReviewStatus.RISK_FLAGGED.value,
 }
+REVIEW_FIELD_NAMES_BY_DATASET_TYPE = {
+    "sft": frozenset({"prompt", "response"}),
+    "dpo": frozenset({"prompt", "chosen", "rejected"}),
+    "cpt": frozenset({"text"}),
+    "eval": frozenset({"prompt", "expected_points"}),
+}
 
 
 def iter_jsonl(path: Path) -> Iterable[tuple[int, dict[str, Any]]]:
@@ -55,20 +61,45 @@ def require_string(value: Any, field_name: str) -> str:
     return value
 
 
-def require_risk_flags(value: Any) -> list[str]:
+def require_risk_flags(value: Any, *, require_non_empty: bool = False) -> list[str]:
     if value is None:
+        if require_non_empty:
+            raise ValueError("risk_flagged reviews must include at least one risk flag")
         return []
     if not isinstance(value, list):
         raise ValueError("risk_flags must be a list")
     if any(not isinstance(flag, str) or not flag.strip() for flag in value):
         raise ValueError("risk_flags must contain only non-empty strings")
+    if require_non_empty and not value:
+        raise ValueError("risk_flagged reviews must include at least one risk flag")
     return value
 
 
-def require_fields_mapping(payload: dict[str, Any]) -> dict[str, Any]:
+def expected_review_field_names(original_record: dict[str, Any]) -> frozenset[str]:
+    dataset_type = original_record.get("dataset_type")
+    try:
+        return REVIEW_FIELD_NAMES_BY_DATASET_TYPE[str(dataset_type)]
+    except KeyError as exc:
+        raise ValueError(
+            f"unsupported dataset_type for reviewed fields: {dataset_type!r}"
+        ) from exc
+
+
+def require_fields_mapping(
+    payload: dict[str, Any],
+    *,
+    original_record: dict[str, Any],
+) -> dict[str, Any]:
     fields = payload.get("fields")
     if not isinstance(fields, dict) or not fields:
         raise ValueError("review payload must include a non-empty fields object")
+    allowed_fields = expected_review_field_names(original_record)
+    unexpected_fields = sorted(set(fields) - allowed_fields)
+    if unexpected_fields:
+        raise ValueError(
+            "review fields contain unsupported key(s): "
+            + ", ".join(repr(field) for field in unexpected_fields)
+        )
     return fields
 
 
@@ -88,7 +119,7 @@ def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("review payload must include an original_record object")
 
     review = require_review_mapping(payload)
-    fields = require_fields_mapping(payload)
+    fields = require_fields_mapping(payload, original_record=original_record)
     review_status = require_string(review.get("review_status"), "review_status")
     if review_status not in SUPPORTED_REVIEW_STATUSES:
         allowed = ", ".join(sorted(SUPPORTED_REVIEW_STATUSES))
@@ -100,13 +131,21 @@ def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
 
     updated_provenance = dict(provenance)
     updated_provenance["review_status"] = review_status
-    updated_provenance["risk_flags"] = require_risk_flags(review.get("risk_flags", []))
+    updated_provenance["risk_flags"] = require_risk_flags(
+        review.get("risk_flags", []),
+        require_non_empty=review_status == ReviewStatus.RISK_FLAGGED.value,
+    )
 
     if (
         review_status == ReviewStatus.EDITED_AND_APPROVED.value
         and updated_provenance.get("source_type") == SourceType.AI_CANDIDATE_UNREVIEWED.value
     ):
         updated_provenance["source_type"] = SourceType.HUMAN_EDITED_AI_ASSISTED.value
+    elif (
+        review_status == ReviewStatus.APPROVED.value
+        and updated_provenance.get("source_type") == SourceType.AI_CANDIDATE_UNREVIEWED.value
+    ):
+        raise ValueError("ai_candidate_unreviewed requires edited_and_approved review")
     elif (
         review_status == ReviewStatus.EDITED_AND_APPROVED.value
         and updated_provenance.get("source_type") == SourceType.RAW_AI_OUTPUT.value
