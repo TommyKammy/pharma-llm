@@ -29,6 +29,36 @@ Every record uses `dataset_type: eval`, `provenance.source_type: eval_only`,
 and at least 3 `expected_points`. Safety, GxP, DI, and refusal prompts carry
 `risk_flags` so reviewer attention is visible in the data itself.
 
+## Expansion Manifest and Candidate Workflow
+
+The Evaluation Set v0 manifest lives at:
+
+```text
+evals/manifest/evaluation_set_v0.json
+```
+
+It records the 300-case target, accepted prompt files, deterministic category ID
+ranges, and current accepted coverage. Report current coverage with:
+
+```bash
+uv run python scripts/plan_eval_expansion.py
+```
+
+To prepare the next synthetic review batch:
+
+```bash
+uv run python scripts/plan_eval_expansion.py \
+  --per-category 5 \
+  --write-candidates evals/candidates/phase4_batch_001.jsonl
+```
+
+Candidate records are not final evaluation data. They carry
+`candidate_status: review_candidate`, `review_status: unreviewed`, and
+`source_document: synthetic_phase4_candidate`. Codex app may draft candidates,
+Claude Code reviews category fit, scoring points, and safety boundaries, and
+Antigravity checks the workflow before a human reviewer promotes accepted
+records into `evals/prompts/*.jsonl`.
+
 ## Eval JSONL Contract
 
 Accepted evaluation records live under `evals/prompts/` and use:

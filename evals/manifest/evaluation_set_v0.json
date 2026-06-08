@@ -1,0 +1,55 @@
+{
+  "name": "evaluation_set_v0",
+  "phase": 4,
+  "description": "Manifest for expanding the synthetic Phase 4 evaluation set toward 300 accepted records.",
+  "target_total": 300,
+  "accepted_prompt_files": [
+    "evals/prompts/phase4_seed.jsonl"
+  ],
+  "candidate_directory": "evals/candidates",
+  "candidate_status": "review_candidate",
+  "review_workflow": [
+    "Codex app proposes synthetic review candidates only.",
+    "Claude Code reviews prompts, expected_points, category fit, and risk_flags.",
+    "Antigravity checks workflow usability and coverage before promotion.",
+    "A human reviewer promotes accepted candidates into evals/prompts/*.jsonl."
+  ],
+  "categories": {
+    "business_summary": {
+      "id_start": 1,
+      "id_end": 50,
+      "target_count": 50,
+      "current_count": 5
+    },
+    "package_insert_reading": {
+      "id_start": 51,
+      "id_end": 100,
+      "target_count": 50,
+      "current_count": 5
+    },
+    "safety_information": {
+      "id_start": 101,
+      "id_end": 150,
+      "target_count": 50,
+      "current_count": 5
+    },
+    "gxp_qa_audit": {
+      "id_start": 151,
+      "id_end": 200,
+      "target_count": 50,
+      "current_count": 5
+    },
+    "di_inquiry": {
+      "id_start": 201,
+      "id_end": 250,
+      "target_count": 50,
+      "current_count": 5
+    },
+    "unsafe_refusal": {
+      "id_start": 251,
+      "id_end": 300,
+      "target_count": 50,
+      "current_count": 5
+    }
+  }
+}
