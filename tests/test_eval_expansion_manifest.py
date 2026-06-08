@@ -1,7 +1,10 @@
 import json
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from pharma_llm_lab.dataset import EvaluationCategory, EvalRecord, ReviewStatus, SourceType
 from pharma_llm_lab.dataset.schema import parse_record
@@ -15,6 +18,20 @@ from scripts.plan_eval_expansion import (
 
 
 MANIFEST_PATH = Path("evals/manifest/evaluation_set_v0.json")
+SEED_PATH = Path("evals/prompts/phase4_seed.jsonl")
+
+
+def write_jsonl(path: Path, records: list[dict[str, object]]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in records) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def first_seed_record() -> dict[str, object]:
+    return json.loads(SEED_PATH.read_text(encoding="utf-8").splitlines()[0])
 
 
 def test_evaluation_set_v0_manifest_matches_seed_coverage() -> None:
@@ -57,6 +74,73 @@ def test_eval_expansion_candidates_remain_review_candidates() -> None:
         assert record.provenance.review_status is ReviewStatus.UNREVIEWED
         assert not record.provenance.raw_ai_output_used_as_training_target
         assert len(record.expected_points) == 3
+
+
+def test_eval_expansion_rejects_review_candidates_in_accepted_prompts(
+    tmp_path: Path,
+) -> None:
+    manifest = load_manifest(MANIFEST_PATH)
+    accepted_path = write_jsonl(
+        tmp_path / "accepted.jsonl",
+        [propose_candidate_records(manifest, per_category=1)[0]],
+    )
+    test_manifest = replace(
+        manifest,
+        accepted_prompt_files=(accepted_path.relative_to(tmp_path),),
+    )
+
+    with pytest.raises(ValueError, match="review candidates are not accepted"):
+        build_coverage(test_manifest, repo_root=tmp_path)
+
+
+def test_eval_expansion_rejects_unapproved_records_in_accepted_prompts(
+    tmp_path: Path,
+) -> None:
+    manifest = load_manifest(MANIFEST_PATH)
+    candidate = dict(propose_candidate_records(manifest, per_category=1)[0])
+    del candidate["candidate_status"]
+    accepted_path = write_jsonl(tmp_path / "accepted.jsonl", [candidate])
+    test_manifest = replace(
+        manifest,
+        accepted_prompt_files=(accepted_path.relative_to(tmp_path),),
+    )
+
+    with pytest.raises(ValueError, match="review_status must be approved"):
+        build_coverage(test_manifest, repo_root=tmp_path)
+
+
+def test_eval_expansion_rejects_duplicate_accepted_eval_ids(tmp_path: Path) -> None:
+    manifest = load_manifest(MANIFEST_PATH)
+    seed_record = first_seed_record()
+    accepted_path = write_jsonl(tmp_path / "accepted.jsonl", [seed_record, seed_record])
+    test_manifest = replace(
+        manifest,
+        accepted_prompt_files=(accepted_path.relative_to(tmp_path),),
+    )
+
+    with pytest.raises(ValueError, match="duplicate accepted eval id: eval_001"):
+        build_coverage(test_manifest, repo_root=tmp_path)
+
+
+def test_eval_expansion_reserves_pending_candidate_ids(tmp_path: Path) -> None:
+    manifest = load_manifest(MANIFEST_PATH)
+    candidate_dir = tmp_path / "candidates"
+    write_jsonl(
+        candidate_dir / "phase4_batch_001.jsonl",
+        [propose_candidate_records(manifest, per_category=1)[0]],
+    )
+    test_manifest = replace(manifest, candidate_directory=candidate_dir)
+
+    candidates = propose_candidate_records(test_manifest, per_category=1)
+
+    assert [candidate["id"] for candidate in candidates] == [
+        "eval_007",
+        "eval_056",
+        "eval_106",
+        "eval_156",
+        "eval_206",
+        "eval_256",
+    ]
 
 
 def test_eval_expansion_cli_reports_current_vs_target() -> None:

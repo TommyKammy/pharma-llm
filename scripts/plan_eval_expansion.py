@@ -12,11 +12,22 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from pharma_llm_lab.dataset import EvaluationCategory, EvalRecord, SourceType, parse_record  # noqa: E402
+from pharma_llm_lab.dataset import (  # noqa: E402
+    EvaluationCategory,
+    EvalRecord,
+    ReviewStatus,
+    SourceType,
+    parse_record,
+)
 from pharma_llm_lab.dataset.validators import iter_jsonl  # noqa: E402
 
 
 DEFAULT_MANIFEST = Path("evals/manifest/evaluation_set_v0.json")
+
+ACCEPTED_REVIEW_STATUSES = {
+    ReviewStatus.APPROVED,
+    ReviewStatus.EDITED_AND_APPROVED,
+}
 
 
 @dataclass(frozen=True)
@@ -102,11 +113,47 @@ def load_accepted_records(manifest: ExpansionManifest, *, repo_root: Path) -> tu
         for line_number, item in iter_jsonl(path):
             if not isinstance(item, dict):
                 raise ValueError(f"{path}:{line_number}: {item.message}")
+            if item.get("candidate_status") == manifest.candidate_status:
+                raise ValueError(
+                    f"{path}:{line_number}: review candidates are not accepted eval records"
+                )
             record = parse_record(item)
             if not isinstance(record, EvalRecord):
                 raise ValueError(f"{path}:{line_number}: expected an eval record")
+            if record.provenance.review_status not in ACCEPTED_REVIEW_STATUSES:
+                raise ValueError(
+                    f"{path}:{line_number}: {record.id} review_status must be approved "
+                    "before accepted coverage counts it"
+                )
             records.append(record)
     return tuple(records)
+
+
+def load_pending_candidate_ids(
+    manifest: ExpansionManifest, *, repo_root: Path = REPO_ROOT
+) -> set[int]:
+    candidate_dir = repo_root / manifest.candidate_directory
+    if not candidate_dir.exists():
+        return set()
+    if not candidate_dir.is_dir():
+        raise ValueError(f"candidate_directory is not a directory: {candidate_dir}")
+
+    candidate_ids: set[int] = set()
+    for path in sorted(candidate_dir.glob("*.jsonl")):
+        for line_number, item in iter_jsonl(path):
+            if not isinstance(item, dict):
+                raise ValueError(f"{path}:{line_number}: {item.message}")
+            if item.get("candidate_status") != manifest.candidate_status:
+                continue
+            raw_id = item.get("id")
+            if not isinstance(raw_id, str):
+                raise ValueError(f"{path}:{line_number}: candidate id must be a string")
+            id_number = eval_id_number(raw_id)
+            if id_number in candidate_ids:
+                raise ValueError(f"{path}:{line_number}: duplicate pending candidate id {raw_id}")
+            candidate_ids.add(id_number)
+
+    return candidate_ids
 
 
 def build_coverage(
@@ -114,8 +161,13 @@ def build_coverage(
 ) -> dict[EvaluationCategory, int]:
     coverage = {plan.category: 0 for plan in manifest.categories}
     plans_by_category = {plan.category: plan for plan in manifest.categories}
+    seen_ids: set[str] = set()
 
     for record in load_accepted_records(manifest, repo_root=repo_root):
+        if record.id in seen_ids:
+            raise ValueError(f"duplicate accepted eval id: {record.id}")
+        seen_ids.add(record.id)
+
         plan = plans_by_category[record.category]
         id_number = eval_id_number(record.id)
         if id_number not in plan.id_range:
@@ -149,7 +201,10 @@ def propose_candidate_records(
     per_category: int = 1,
 ) -> tuple[dict[str, Any], ...]:
     accepted_records = load_accepted_records(manifest, repo_root=repo_root)
-    used_ids = {eval_id_number(record.id) for record in accepted_records}
+    used_ids = {
+        *{eval_id_number(record.id) for record in accepted_records},
+        *load_pending_candidate_ids(manifest, repo_root=repo_root),
+    }
     candidates: list[dict[str, Any]] = []
 
     for plan in manifest.categories:
