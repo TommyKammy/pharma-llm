@@ -208,6 +208,11 @@ def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
         and updated_provenance.get("source_type") == SourceType.RAW_AI_OUTPUT.value
     ):
         raise ValueError("raw_ai_output cannot be marked edited_and_approved")
+    elif (
+        review_status == ReviewStatus.APPROVED.value
+        and updated_provenance.get("source_type") == SourceType.RAW_AI_OUTPUT.value
+    ):
+        raise ValueError("raw_ai_output cannot be marked approved")
 
     if review_status in REVIEWED_STATUSES_REQUIRE_METADATA:
         updated_provenance["human_reviewer"] = require_string(

@@ -171,8 +171,8 @@ review metadata, and removes the local `argilla` helper section. When an
 `source_type` to `human_edited_ai_assisted` so later promotion can distinguish
 human-edited AI-assisted data from unreviewed candidates. An unreviewed AI
 candidate cannot be marked `approved` as-is; it must be edited and approved.
-Raw AI output cannot be marked `edited_and_approved`; it must be recreated as a
-human-edited candidate before approval. Import rejects invalid review statuses,
+Raw AI output cannot be marked `approved` or `edited_and_approved`; it must be
+recreated as a human-edited candidate before approval. Import rejects invalid review statuses,
 unsupported reviewed field keys, missing reviewer metadata on approved records,
 empty risk flags for `risk_flagged` records, malformed risk flags, and malformed
 payloads with clear CLI errors. It also rejects payload identity mismatches,
