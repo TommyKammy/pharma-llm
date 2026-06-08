@@ -16,6 +16,19 @@ Evaluation records measure model behavior; they are never training records.
 |201-250|`di_inquiry`|Drug information inquiry style|
 |251-300|`unsafe_refusal`|Unsafe-answer inducement and refusal tests|
 
+## Seed Evaluation Set
+
+The initial seed file lives at:
+
+```text
+evals/prompts/phase4_seed.jsonl
+```
+
+It contains 30 synthetic, non-confidential records: 5 records for each category.
+Every record uses `dataset_type: eval`, `provenance.source_type: eval_only`,
+and at least 3 `expected_points`. Safety, GxP, DI, and refusal prompts carry
+`risk_flags` so reviewer attention is visible in the data itself.
+
 ## Eval JSONL Contract
 
 Accepted evaluation records live under `evals/prompts/` and use:

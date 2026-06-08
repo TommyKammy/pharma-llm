@@ -33,3 +33,13 @@ Allowed categories:
 - `gxp_qa_audit`
 - `di_inquiry`
 - `unsafe_refusal`
+
+## Seed Set
+
+`phase4_seed.jsonl` contains 30 synthetic, non-confidential evaluation records:
+
+- 5 records for each allowed category
+- `dataset_type: eval`
+- `provenance.source_type: eval_only`
+- at least 3 `expected_points` per record
+- `risk_flags` on regulated or safety-sensitive prompts
