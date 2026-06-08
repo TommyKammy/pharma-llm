@@ -156,6 +156,10 @@ def review_workflow_policy_failure(
     *,
     raw_record: dict[str, Any],
 ) -> str | None:
+    is_human_edited_ai_workflow = (
+        record.provenance.ai_assisted
+        or record.provenance.source_type is SourceType.HUMAN_EDITED_AI_ASSISTED
+    )
     if record.provenance.is_reviewed_for_training:
         if not record.provenance.human_reviewer:
             return "reviewed records require human_reviewer before promotion"
@@ -181,11 +185,14 @@ def review_workflow_policy_failure(
             "human_edited_ai_assisted source_type"
         )
     if (
-        record.provenance.ai_assisted
+        is_human_edited_ai_workflow
         and record.provenance.review_status is ReviewStatus.EDITED_AND_APPROVED
         and not promotion_target_fields_changed(raw_record)
     ):
-        return "edited_and_approved ai_assisted records require edited target fields"
+        return (
+            "edited_and_approved human_edited_ai_assisted records require "
+            "edited target fields"
+        )
     return None
 
 

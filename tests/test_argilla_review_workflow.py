@@ -992,6 +992,40 @@ def test_promote_reviewed_dataset_skips_ai_assisted_without_edit_evidence(
     assert "edited target fields" in result.skipped[0].reason
 
 
+def test_promote_reviewed_dataset_skips_human_edited_source_without_edit_evidence(
+    tmp_path: Path,
+) -> None:
+    human_edited_record = {
+        **sample_records()[0],
+        "provenance": {
+            **sample_records()[0]["provenance"],
+            "source_type": "human_edited_ai_assisted",
+            "review_status": "edited_and_approved",
+            "ai_assisted": False,
+            "ai_tool": None,
+            "human_reviewer": "reviewer_a",
+            "review_date": "2026-06-08",
+        },
+    }
+    reviewed_path = write_jsonl(
+        tmp_path / "reviewed_human_edited_without_edit_evidence.jsonl",
+        [human_edited_record],
+    )
+    prepared_path = tmp_path / "prepared_sft.jsonl"
+
+    result = promote_reviewed_dataset(
+        reviewed_path,
+        prepared_path,
+        dataset_type_value="sft",
+    )
+
+    assert not result.ok
+    assert not prepared_path.exists()
+    assert not result.promoted
+    assert result.skipped[0].id == "phase3_argilla_sample_001"
+    assert "edited target fields" in result.skipped[0].reason
+
+
 def test_promote_reviewed_dataset_accepts_imported_ai_assisted_edit_evidence(
     tmp_path: Path,
 ) -> None:
