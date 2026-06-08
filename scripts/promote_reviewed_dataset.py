@@ -99,6 +99,28 @@ def prepared_record(raw_record: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in raw_record.items() if key != "argilla"}
 
 
+def abort_promoted_candidates(
+    *,
+    promoted: list[PromotionAuditEntry] | tuple[PromotionAuditEntry, ...],
+    skipped: list[PromotionAuditEntry] | tuple[PromotionAuditEntry, ...],
+    failed: list[PromotionAuditEntry] | tuple[PromotionAuditEntry, ...],
+) -> PromotionResult:
+    blocked_candidates = tuple(
+        PromotionAuditEntry(
+            id=entry.id,
+            status="failed",
+            reason="eligible record was not promoted because input validation failed",
+        )
+        for entry in promoted
+    )
+    return PromotionResult(
+        promoted_records=(),
+        promoted=(),
+        skipped=tuple(skipped),
+        failed=tuple(failed) + blocked_candidates,
+    )
+
+
 def review_workflow_policy_failure(record: Any) -> str | None:
     if record.provenance.is_reviewed_for_training:
         if not record.provenance.human_reviewer:
@@ -226,6 +248,13 @@ def evaluate_promotion(
             )
         )
 
+    if failed:
+        return abort_promoted_candidates(
+            promoted=promoted,
+            skipped=skipped,
+            failed=failed,
+        )
+
     return PromotionResult(
         promoted_records=tuple(promoted_records),
         promoted=tuple(promoted),
@@ -288,8 +317,7 @@ def promote_reviewed_dataset(
             )
             for error in validation.errors
         )
-        return PromotionResult(
-            promoted_records=result.promoted_records,
+        return abort_promoted_candidates(
             promoted=result.promoted,
             skipped=result.skipped,
             failed=failed,

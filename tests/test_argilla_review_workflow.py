@@ -763,6 +763,37 @@ def test_promote_reviewed_dataset_fails_without_writing_on_schema_errors(
     assert "provenance must be an object" in result.failed[0].reason
 
 
+def test_promote_reviewed_dataset_does_not_audit_promoted_on_mixed_failure(
+    tmp_path: Path,
+) -> None:
+    bad_record = {
+        **sample_records()[1],
+        "provenance": None,
+    }
+    reviewed_path = write_jsonl(
+        tmp_path / "reviewed_mixed.jsonl",
+        [sample_records()[0], bad_record],
+    )
+    prepared_path = tmp_path / "prepared_sft.jsonl"
+
+    result = promote_reviewed_dataset(
+        reviewed_path,
+        prepared_path,
+        dataset_type_value="sft",
+    )
+
+    assert not result.ok
+    assert not prepared_path.exists()
+    assert not result.promoted_records
+    assert not result.promoted
+    assert [entry.id for entry in result.failed] == [
+        "phase3_argilla_sample_002",
+        "phase3_argilla_sample_001",
+    ]
+    assert "provenance must be an object" in result.failed[0].reason
+    assert "eligible record was not promoted" in result.failed[1].reason
+
+
 def test_promote_reviewed_dataset_fails_when_no_records_are_promoted(
     tmp_path: Path,
 ) -> None:
