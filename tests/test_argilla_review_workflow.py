@@ -90,6 +90,7 @@ def test_import_from_argilla_applies_review_metadata(tmp_path: Path) -> None:
     assert imported[0]["provenance"]["human_reviewer"] == "reviewer_a"
     assert imported[0]["provenance"]["review_date"] == "2026-06-08"
     assert imported[0]["provenance"]["risk_flags"] == ["medical_advice", "edited"]
+    assert imported[0]["provenance"]["target_fields_edited"] is True
 
 
 def test_import_from_argilla_rejects_raw_ai_output_edited_approval(
@@ -697,6 +698,7 @@ def test_promote_reviewed_dataset_writes_only_training_eligible_records(
         sample_records()[0],
         {
             **sample_records()[1],
+            "original_record": sample_records()[1],
             "response": "服薬変更は担当医療者に確認し、一般情報に限定して説明します。",
             "provenance": {
                 **sample_records()[1]["provenance"],
@@ -733,6 +735,7 @@ def test_promote_reviewed_dataset_writes_only_training_eligible_records(
         "phase3_argilla_sample_002",
     ]
     assert all("argilla" not in record for record in prepared)
+    assert all("original_record" not in record for record in prepared)
     assert len(result.promoted) == 2
     assert len(result.skipped) == 2
     assert not result.failed
@@ -953,6 +956,74 @@ def test_promote_reviewed_dataset_skips_ai_assisted_without_human_edit_source(
     assert not result.promoted
     assert result.skipped[0].id == "phase3_argilla_sample_001"
     assert "human_edited_ai_assisted source_type" in result.skipped[0].reason
+
+
+def test_promote_reviewed_dataset_skips_ai_assisted_without_edit_evidence(
+    tmp_path: Path,
+) -> None:
+    ai_assisted_record = {
+        **sample_records()[0],
+        "provenance": {
+            **sample_records()[0]["provenance"],
+            "source_type": "human_edited_ai_assisted",
+            "review_status": "edited_and_approved",
+            "ai_assisted": True,
+            "ai_tool": "codex_app",
+            "human_reviewer": "reviewer_a",
+            "review_date": "2026-06-08",
+        },
+    }
+    reviewed_path = write_jsonl(
+        tmp_path / "reviewed_ai_assisted_without_edit_evidence.jsonl",
+        [ai_assisted_record],
+    )
+    prepared_path = tmp_path / "prepared_sft.jsonl"
+
+    result = promote_reviewed_dataset(
+        reviewed_path,
+        prepared_path,
+        dataset_type_value="sft",
+    )
+
+    assert not result.ok
+    assert not prepared_path.exists()
+    assert not result.promoted
+    assert result.skipped[0].id == "phase3_argilla_sample_001"
+    assert "edited target fields" in result.skipped[0].reason
+
+
+def test_promote_reviewed_dataset_accepts_imported_ai_assisted_edit_evidence(
+    tmp_path: Path,
+) -> None:
+    imported_record = {
+        **sample_records()[0],
+        "response": "人間が編集した安全な回答です。",
+        "provenance": {
+            **sample_records()[0]["provenance"],
+            "source_type": "human_edited_ai_assisted",
+            "review_status": "edited_and_approved",
+            "ai_assisted": True,
+            "ai_tool": "codex_app",
+            "human_reviewer": "reviewer_a",
+            "review_date": "2026-06-08",
+            "target_fields_edited": True,
+        },
+    }
+    reviewed_path = write_jsonl(
+        tmp_path / "reviewed_imported_ai_assisted.jsonl",
+        [imported_record],
+    )
+    prepared_path = tmp_path / "prepared_sft.jsonl"
+
+    result = promote_reviewed_dataset(
+        reviewed_path,
+        prepared_path,
+        dataset_type_value="sft",
+    )
+    prepared = read_jsonl(prepared_path)
+
+    assert result.ok
+    assert [record["id"] for record in prepared] == ["phase3_argilla_sample_001"]
 
 
 def test_promote_reviewed_dataset_removes_stale_output_on_failure(

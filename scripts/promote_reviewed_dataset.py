@@ -24,6 +24,12 @@ from pharma_llm_lab.dataset.validators import (  # noqa: E402
 
 
 TRAINING_DATASET_TYPES = {"sft", "dpo", "cpt"}
+PROMOTION_HELPER_FIELDS = {"argilla", "fields", "original_record", "review"}
+PROMOTION_TARGET_FIELD_NAMES_BY_DATASET_TYPE = {
+    "sft": frozenset({"response"}),
+    "dpo": frozenset({"chosen", "rejected"}),
+    "cpt": frozenset({"text"}),
+}
 
 
 @dataclass(frozen=True)
@@ -96,7 +102,31 @@ def parse_training_dataset_type(value: str) -> str:
 
 
 def prepared_record(raw_record: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in raw_record.items() if key != "argilla"}
+    return {
+        key: value
+        for key, value in raw_record.items()
+        if key not in PROMOTION_HELPER_FIELDS
+    }
+
+
+def promotion_target_fields_changed(raw_record: dict[str, Any]) -> bool:
+    raw_provenance = raw_record.get("provenance")
+    if isinstance(raw_provenance, dict) and raw_provenance.get("target_fields_edited") is True:
+        return True
+
+    original_record = raw_record.get("original_record")
+    if not isinstance(original_record, dict):
+        return False
+
+    target_field_names = PROMOTION_TARGET_FIELD_NAMES_BY_DATASET_TYPE.get(
+        str(raw_record.get("dataset_type"))
+    )
+    if not target_field_names:
+        return False
+    return any(
+        field_name in raw_record and original_record.get(field_name) != raw_record[field_name]
+        for field_name in target_field_names
+    )
 
 
 def abort_promoted_candidates(
@@ -121,7 +151,11 @@ def abort_promoted_candidates(
     )
 
 
-def review_workflow_policy_failure(record: Any) -> str | None:
+def review_workflow_policy_failure(
+    record: Any,
+    *,
+    raw_record: dict[str, Any],
+) -> str | None:
     if record.provenance.is_reviewed_for_training:
         if not record.provenance.human_reviewer:
             return "reviewed records require human_reviewer before promotion"
@@ -146,6 +180,12 @@ def review_workflow_policy_failure(record: Any) -> str | None:
             "edited_and_approved ai_assisted records require "
             "human_edited_ai_assisted source_type"
         )
+    if (
+        record.provenance.ai_assisted
+        and record.provenance.review_status is ReviewStatus.EDITED_AND_APPROVED
+        and not promotion_target_fields_changed(raw_record)
+    ):
+        return "edited_and_approved ai_assisted records require edited target fields"
     return None
 
 
@@ -228,7 +268,10 @@ def evaluate_promotion(
             )
             continue
 
-        review_policy_failure = review_workflow_policy_failure(record)
+        review_policy_failure = review_workflow_policy_failure(
+            record,
+            raw_record=raw_record,
+        )
         if review_policy_failure:
             skipped.append(
                 PromotionAuditEntry(
