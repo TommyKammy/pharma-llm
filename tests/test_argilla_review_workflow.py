@@ -860,6 +860,70 @@ def test_promote_reviewed_dataset_skips_approved_human_edited_ai_assisted_source
     )
 
 
+def test_promote_reviewed_dataset_skips_reviewed_records_without_metadata(
+    tmp_path: Path,
+) -> None:
+    missing_metadata_record = {
+        **sample_records()[0],
+        "provenance": {
+            **sample_records()[0]["provenance"],
+            "human_reviewer": None,
+            "review_date": None,
+        },
+    }
+    reviewed_path = write_jsonl(
+        tmp_path / "reviewed_missing_metadata.jsonl",
+        [missing_metadata_record],
+    )
+    prepared_path = tmp_path / "prepared_sft.jsonl"
+
+    result = promote_reviewed_dataset(
+        reviewed_path,
+        prepared_path,
+        dataset_type_value="sft",
+    )
+
+    assert not result.ok
+    assert not prepared_path.exists()
+    assert not result.promoted
+    assert result.skipped[0].id == "phase3_argilla_sample_001"
+    assert "reviewed records require human_reviewer" in result.skipped[0].reason
+
+
+def test_promote_reviewed_dataset_skips_ai_assisted_without_human_edit_source(
+    tmp_path: Path,
+) -> None:
+    ai_assisted_record = {
+        **sample_records()[0],
+        "provenance": {
+            **sample_records()[0]["provenance"],
+            "source_type": "public_doc_derived",
+            "review_status": "edited_and_approved",
+            "ai_assisted": True,
+            "ai_tool": "codex_app",
+            "human_reviewer": "reviewer_a",
+            "review_date": "2026-06-08",
+        },
+    }
+    reviewed_path = write_jsonl(
+        tmp_path / "reviewed_ai_assisted_unedited.jsonl",
+        [ai_assisted_record],
+    )
+    prepared_path = tmp_path / "prepared_sft.jsonl"
+
+    result = promote_reviewed_dataset(
+        reviewed_path,
+        prepared_path,
+        dataset_type_value="sft",
+    )
+
+    assert not result.ok
+    assert not prepared_path.exists()
+    assert not result.promoted
+    assert result.skipped[0].id == "phase3_argilla_sample_001"
+    assert "human_edited_ai_assisted source_type" in result.skipped[0].reason
+
+
 def test_promote_reviewed_dataset_removes_stale_output_on_failure(
     tmp_path: Path,
 ) -> None:
@@ -893,6 +957,23 @@ def test_promote_reviewed_dataset_removes_stale_output_on_failure(
     assert first_result.ok
     assert not second_result.ok
     assert not prepared_path.exists()
+
+
+def test_promote_reviewed_dataset_rejects_input_output_collision(
+    tmp_path: Path,
+) -> None:
+    reviewed_path = write_jsonl(tmp_path / "reviewed.jsonl", [sample_records()[0]])
+    original_reviewed_content = reviewed_path.read_text(encoding="utf-8")
+
+    result = promote_reviewed_dataset(
+        reviewed_path,
+        reviewed_path,
+        dataset_type_value="sft",
+    )
+
+    assert not result.ok
+    assert result.failed[0].reason == "input and output paths must differ"
+    assert reviewed_path.read_text(encoding="utf-8") == original_reviewed_content
 
 
 def test_promote_reviewed_dataset_cli_writes_audit_summary(
@@ -985,6 +1066,32 @@ def test_promote_reviewed_dataset_cli_rejects_audit_input_collision(
     assert "--audit-output must not be the same path as input" in result.stderr
     assert reviewed_path.read_text(encoding="utf-8") == original_reviewed_content
     assert not prepared_path.exists()
+
+
+def test_promote_reviewed_dataset_cli_rejects_input_output_collision(
+    tmp_path: Path,
+) -> None:
+    reviewed_path = write_jsonl(tmp_path / "reviewed.jsonl", [sample_records()[0]])
+    original_reviewed_content = reviewed_path.read_text(encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path("scripts/promote_reviewed_dataset.py").resolve()),
+            "--dataset-type",
+            "sft",
+            str(reviewed_path),
+            str(reviewed_path),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=tmp_path,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "input and output paths must differ" in result.stderr
+    assert reviewed_path.read_text(encoding="utf-8") == original_reviewed_content
 
 
 def test_promote_reviewed_dataset_rejects_eval_dataset_type(tmp_path: Path) -> None:

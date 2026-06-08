@@ -100,6 +100,11 @@ def prepared_record(raw_record: dict[str, Any]) -> dict[str, Any]:
 
 
 def review_workflow_policy_failure(record: Any) -> str | None:
+    if record.provenance.is_reviewed_for_training:
+        if not record.provenance.human_reviewer:
+            return "reviewed records require human_reviewer before promotion"
+        if not record.provenance.review_date:
+            return "reviewed records require review_date before promotion"
     if (
         record.provenance.source_type is SourceType.HUMAN_EDITED_AI_ASSISTED
         and record.provenance.review_status is ReviewStatus.APPROVED
@@ -110,6 +115,15 @@ def review_workflow_policy_failure(record: Any) -> str | None:
         and record.provenance.review_status is ReviewStatus.APPROVED
     ):
         return "ai_assisted records require edited_and_approved review"
+    if (
+        record.provenance.ai_assisted
+        and record.provenance.review_status is ReviewStatus.EDITED_AND_APPROVED
+        and record.provenance.source_type is not SourceType.HUMAN_EDITED_AI_ASSISTED
+    ):
+        return (
+            "edited_and_approved ai_assisted records require "
+            "human_edited_ai_assisted source_type"
+        )
     return None
 
 
@@ -234,6 +248,17 @@ def promote_reviewed_dataset(
     *,
     dataset_type_value: str,
 ) -> PromotionResult:
+    if paths_collide(input_path, output_path):
+        return PromotionResult(
+            failed=(
+                PromotionAuditEntry(
+                    id=str(output_path),
+                    status="failed",
+                    reason="input and output paths must differ",
+                ),
+            )
+        )
+
     result = evaluate_promotion(input_path, dataset_type_value=dataset_type_value)
     if not result.ok:
         remove_stale_output(output_path)
@@ -301,6 +326,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--audit-output must not be the same path as output")
     if args.audit_output and paths_collide(args.audit_output, args.input):
         parser.error("--audit-output must not be the same path as input")
+    if paths_collide(args.input, args.output):
+        parser.error("input and output paths must differ")
 
     result = promote_reviewed_dataset(
         args.input,
