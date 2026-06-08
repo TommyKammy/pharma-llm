@@ -168,11 +168,14 @@ uv run python scripts/import_from_argilla.py \
 Import copies reviewed `fields` back onto the dataset record, updates provenance
 review metadata, and removes the local `argilla` helper section. When an
 `ai_candidate_unreviewed` record is marked `edited_and_approved`, import changes
-`source_type` to `human_edited_ai_assisted` so later promotion can distinguish
-human-edited AI-assisted data from unreviewed candidates. An unreviewed AI
-candidate cannot be marked `approved` as-is; it must be edited and approved.
-Raw AI output cannot be marked `approved` or `edited_and_approved`; it must be
-recreated as a human-edited candidate before approval. Import rejects invalid review statuses,
+`source_type` to `human_edited_ai_assisted` and clears
+`raw_ai_output_used_as_training_target` because the reviewed fields now replace
+the candidate target. An unreviewed AI candidate cannot be marked `approved`
+as-is; it must be edited and approved. Existing risk flags are preserved when
+review payloads omit `review.risk_flags`. Human-edited AI-assisted records must
+use `edited_and_approved`, not plain `approved`. Raw AI output cannot be marked
+`approved` or `edited_and_approved`; it must be recreated as a human-edited
+candidate before approval. Import rejects invalid review statuses,
 unsupported reviewed field keys, missing reviewer metadata on approved records,
 empty risk flags for `risk_flagged` records, malformed risk flags, and malformed
 payloads with clear CLI errors. It also rejects payload identity mismatches,

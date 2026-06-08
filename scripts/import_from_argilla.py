@@ -189,7 +189,7 @@ def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
     updated_provenance = dict(provenance)
     updated_provenance["review_status"] = review_status
     updated_provenance["risk_flags"] = require_risk_flags(
-        review.get("risk_flags", []),
+        review.get("risk_flags", provenance.get("risk_flags", [])),
         require_non_empty=review_status == ReviewStatus.RISK_FLAGGED.value,
     )
 
@@ -198,11 +198,17 @@ def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
         and updated_provenance.get("source_type") == SourceType.AI_CANDIDATE_UNREVIEWED.value
     ):
         updated_provenance["source_type"] = SourceType.HUMAN_EDITED_AI_ASSISTED.value
+        updated_provenance["raw_ai_output_used_as_training_target"] = False
     elif (
         review_status == ReviewStatus.APPROVED.value
         and updated_provenance.get("source_type") == SourceType.AI_CANDIDATE_UNREVIEWED.value
     ):
         raise ValueError("ai_candidate_unreviewed requires edited_and_approved review")
+    elif (
+        review_status == ReviewStatus.APPROVED.value
+        and updated_provenance.get("source_type") == SourceType.HUMAN_EDITED_AI_ASSISTED.value
+    ):
+        raise ValueError("human_edited_ai_assisted requires edited_and_approved review")
     elif (
         review_status == ReviewStatus.EDITED_AND_APPROVED.value
         and updated_provenance.get("source_type") == SourceType.RAW_AI_OUTPUT.value
