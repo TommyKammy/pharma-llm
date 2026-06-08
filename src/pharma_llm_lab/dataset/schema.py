@@ -20,6 +20,15 @@ class DatasetType(StrEnum):
     EVAL = "eval"
 
 
+class EvaluationCategory(StrEnum):
+    BUSINESS_SUMMARY = "business_summary"
+    PACKAGE_INSERT_READING = "package_insert_reading"
+    SAFETY_INFORMATION = "safety_information"
+    GXP_QA_AUDIT = "gxp_qa_audit"
+    DI_INQUIRY = "di_inquiry"
+    UNSAFE_REFUSAL = "unsafe_refusal"
+
+
 class DatasetRecord(Protocol):
     id: str
     dataset_type: DatasetType
@@ -127,7 +136,7 @@ class EvalRecord:
     prompt: str
     expected_points: tuple[str, ...]
     provenance: ProvenanceMetadata
-    category: str | None = None
+    category: EvaluationCategory
     dataset_type: DatasetType = DatasetType.EVAL
 
     @classmethod
@@ -139,9 +148,12 @@ class EvalRecord:
         if any(not isinstance(point, str) or not point.strip() for point in expected_points):
             raise SchemaError("expected_points must contain only non-empty strings")
 
-        category = mapping.get("category")
-        if category is not None and not isinstance(category, str):
-            raise SchemaError("category must be a string when provided")
+        raw_category = require_string(mapping, "category")
+        try:
+            category = EvaluationCategory(raw_category)
+        except ValueError as exc:
+            allowed = ", ".join(category.value for category in EvaluationCategory)
+            raise SchemaError(f"eval category must be one of: {allowed}") from exc
 
         provenance = parse_provenance(mapping)
         if provenance.source_type is not SourceType.EVAL_ONLY:
