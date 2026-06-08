@@ -23,6 +23,36 @@ def write_jsonl(path: Path, records: list[dict[str, object]]) -> Path:
     return path
 
 
+def eval_record(
+    *,
+    record_id: str = "eval_001",
+    review_status: str = "approved",
+    candidate_status: str | None = None,
+) -> dict[str, object]:
+    record = {
+        "id": record_id,
+        "dataset_type": "eval",
+        "category": "business_summary",
+        "prompt": "評価用プロンプトです。",
+        "expected_points": ["観点1", "観点2", "観点3"],
+        "provenance": {
+            "source_type": "eval_only",
+            "source_document": "synthetic_baseline_runner_sample",
+            "source_license": "synthetic_test_only",
+            "review_status": review_status,
+            "ai_assisted": False,
+            "ai_tool": None,
+            "raw_ai_output_used_as_training_target": False,
+            "human_reviewer": "tester" if review_status == "approved" else None,
+            "review_date": "2026-06-09" if review_status == "approved" else None,
+            "risk_flags": [],
+        },
+    }
+    if candidate_status is not None:
+        record["candidate_status"] = candidate_status
+    return record
+
+
 def test_mock_baseline_runner_processes_phase4_seed_eval() -> None:
     predictions = run_mock_baseline(
         eval_path=SEED_PATH,
@@ -114,6 +144,46 @@ def test_mock_baseline_runner_rejects_non_eval_input(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="expected eval record"):
         load_eval_records(bad_path)
+
+
+def test_mock_baseline_runner_rejects_review_candidates(tmp_path: Path) -> None:
+    candidate_path = write_jsonl(
+        tmp_path / "candidate.jsonl",
+        [eval_record(review_status="unreviewed", candidate_status="review_candidate")],
+    )
+
+    with pytest.raises(ValueError, match="review candidates are not accepted"):
+        load_eval_records(candidate_path)
+
+
+def test_mock_baseline_runner_rejects_unapproved_eval_records(tmp_path: Path) -> None:
+    unapproved_path = write_jsonl(
+        tmp_path / "unapproved.jsonl",
+        [eval_record(review_status="rejected")],
+    )
+
+    with pytest.raises(ValueError, match="review_status must be approved"):
+        load_eval_records(unapproved_path)
+
+
+def test_mock_baseline_runner_rejects_duplicate_eval_ids(tmp_path: Path) -> None:
+    duplicate_path = write_jsonl(
+        tmp_path / "duplicate.jsonl",
+        [eval_record(record_id="eval_001"), eval_record(record_id="eval_001")],
+    )
+
+    with pytest.raises(ValueError, match="duplicate eval id eval_001"):
+        load_eval_records(duplicate_path)
+
+
+def test_mock_baseline_runner_rejects_empty_run_id() -> None:
+    with pytest.raises(ValueError, match="run_id must be a non-empty string"):
+        run_mock_baseline(
+            eval_path=SEED_PATH,
+            model_label="qwen-base",
+            run_id="",
+            max_tokens=8,
+        )
 
 
 def test_baseline_runner_cli_writes_prediction_jsonl(tmp_path: Path) -> None:

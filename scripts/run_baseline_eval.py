@@ -13,6 +13,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from pharma_llm_lab.dataset import EvalRecord, parse_record  # noqa: E402
+from pharma_llm_lab.dataset.provenance import ReviewStatus  # noqa: E402
 from pharma_llm_lab.dataset.validators import iter_jsonl  # noqa: E402
 from pharma_llm_lab.inference import (  # noqa: E402
     InferenceRequest,
@@ -24,6 +25,10 @@ from pharma_llm_lab.inference import (  # noqa: E402
 DEFAULT_INPUT = Path("evals/prompts/phase4_seed.jsonl")
 DEFAULT_OUTPUT = Path("results/baseline/mock_predictions.jsonl")
 DEFAULT_RUN_ID = "phase5-baseline-mock"
+ACCEPTED_REVIEW_STATUSES = {
+    ReviewStatus.APPROVED,
+    ReviewStatus.EDITED_AND_APPROVED,
+}
 
 BASELINE_MODEL_IDS = {
     "qwen-base": "qwen/qwen3.6-27b-base",
@@ -60,12 +65,23 @@ class BaselinePrediction:
 
 def load_eval_records(path: Path) -> tuple[EvalRecord, ...]:
     records: list[EvalRecord] = []
+    seen_ids: set[str] = set()
     for line_number, item in iter_jsonl(path):
         if not isinstance(item, dict):
             raise ValueError(f"{path}:{line_number}: {item.message}")
+        if item.get("candidate_status") == "review_candidate":
+            raise ValueError(f"{path}:{line_number}: review candidates are not accepted eval records")
         record = parse_record(item)
         if not isinstance(record, EvalRecord):
             raise ValueError(f"{path}:{line_number}: expected eval record")
+        if record.provenance.review_status not in ACCEPTED_REVIEW_STATUSES:
+            raise ValueError(
+                f"{path}:{line_number}: {record.id} review_status must be approved "
+                "before baseline evaluation"
+            )
+        if record.id in seen_ids:
+            raise ValueError(f"{path}:{line_number}: duplicate eval id {record.id}")
+        seen_ids.add(record.id)
         records.append(record)
 
     if not records:
@@ -100,6 +116,8 @@ def run_mock_baseline(
     run_id: str,
     max_tokens: int,
 ) -> tuple[BaselinePrediction, ...]:
+    if not run_id.strip():
+        raise ValueError("run_id must be a non-empty string")
     if model_label not in BASELINE_MODEL_IDS:
         allowed = ", ".join(sorted(BASELINE_MODEL_IDS))
         raise ValueError(f"model label must be one of: {allowed}")
