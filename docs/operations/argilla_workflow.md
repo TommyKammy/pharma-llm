@@ -201,6 +201,7 @@ Phase 3 includes the offline foundations:
 ```text
 scripts/export_to_argilla.py
 scripts/import_from_argilla.py
+scripts/promote_reviewed_dataset.py
 ```
 
 Phase 3 promotion code must reuse the Phase 2 validator before writing prepared
@@ -209,3 +210,20 @@ training outputs. Promoted records must be eligible under both:
 - `review_status in {"approved", "edited_and_approved"}`
 - Phase 2 training policy checks for `source_type`, `dataset_type`, and
   `raw_ai_output_used_as_training_target`
+
+Promote reviewed records into prepared training JSONL:
+
+```bash
+uv run python scripts/promote_reviewed_dataset.py \
+  --dataset-type sft \
+  --audit-output /Users/tsinfra/Dev/pharma-llm/local/argilla/phase3_promotion_audit.json \
+  /Users/tsinfra/Dev/pharma-llm/local/argilla/phase3_reviewed_dataset.jsonl \
+  /Users/tsinfra/Dev/pharma-llm/local/argilla/prepared_sft.jsonl
+```
+
+Promotion writes only records that pass the Phase 2 validator for the requested
+training dataset type. It removes local `argilla` helper metadata from prepared
+outputs, skips policy-blocked records with explicit reasons, and fails without
+writing output when the reviewed input contains malformed records or when no
+records can be promoted. Promotion targets are limited to `sft`, `dpo`, and `cpt`;
+`eval` remains reviewable but cannot be promoted into training data.

@@ -43,6 +43,7 @@ REVIEW_MUTABLE_PROVENANCE_FIELDS = {
     "human_reviewer",
     "review_date",
     "risk_flags",
+    "target_fields_edited",
 }
 
 
@@ -257,6 +258,10 @@ def apply_review(payload: dict[str, Any]) -> dict[str, Any]:
         and not reviewed_target_fields_changed(original_record, fields)
     ):
         raise ValueError("edited_and_approved ai_assisted records require edited target fields")
+    if review_status == ReviewStatus.EDITED_AND_APPROVED.value and updated_provenance.get(
+        "ai_assisted"
+    ):
+        updated_provenance["target_fields_edited"] = True
 
     if review_status in REVIEWED_STATUSES_REQUIRE_METADATA:
         updated_provenance["human_reviewer"] = require_string(
