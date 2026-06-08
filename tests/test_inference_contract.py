@@ -61,6 +61,20 @@ def test_mock_mlx_inference_client_is_deterministic() -> None:
     assert first.timing.total_latency_ms > 0
 
 
+def test_mock_mlx_inference_client_honors_max_tokens() -> None:
+    request = InferenceRequest(
+        request_id="limited",
+        prompt="alpha beta gamma",
+        max_tokens=2,
+    )
+    client = MockMlxInferenceClient(model=ModelIdentity(model_id="mock"))
+
+    response = client.generate(request)
+
+    assert response.generated_text == "[mock-mlx] alpha"
+    assert response.timing.completion_tokens == 2
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
@@ -75,6 +89,12 @@ def test_inference_request_rejects_invalid_values(
 ) -> None:
     with pytest.raises(InferenceContractError, match=message):
         InferenceRequest(**kwargs)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("temperature", [float("nan"), float("inf")])
+def test_inference_request_rejects_non_finite_temperature(temperature: float) -> None:
+    with pytest.raises(InferenceContractError, match="temperature"):
+        InferenceRequest(request_id="bad", prompt="入力", temperature=temperature)
 
 
 @pytest.mark.parametrize(
@@ -92,3 +112,26 @@ def test_inference_timing_rejects_negative_values(
 ) -> None:
     with pytest.raises(InferenceContractError, match=message):
         InferenceTiming(**timing)
+
+
+@pytest.mark.parametrize(
+    ("timing", "message"),
+    [
+        ({"total_latency_ms": float("nan")}, "total_latency_ms"),
+        ({"total_latency_ms": float("inf")}, "total_latency_ms"),
+        ({"total_latency_ms": 1, "tokens_per_second": float("nan")}, "tokens_per_second"),
+    ],
+)
+def test_inference_timing_rejects_non_finite_values(
+    timing: dict[str, float], message: str
+) -> None:
+    with pytest.raises(InferenceContractError, match=message):
+        InferenceTiming(**timing)
+
+
+@pytest.mark.parametrize("field_name", ["prompt_tokens", "completion_tokens"])
+def test_inference_timing_rejects_fractional_token_counts(field_name: str) -> None:
+    timing = {"total_latency_ms": 1, field_name: 1.5}
+
+    with pytest.raises(InferenceContractError, match=field_name):
+        InferenceTiming(**timing)  # type: ignore[arg-type]

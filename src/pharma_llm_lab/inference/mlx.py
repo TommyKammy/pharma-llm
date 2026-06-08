@@ -33,7 +33,10 @@ class MockMlxInferenceClient:
 
     def generate(self, request: InferenceRequest) -> InferenceResponse:
         prompt_tokens = len(request.prompt.split())
-        generated_text = f"{self.response_prefix} {request.prompt}"
+        generated_tokens = [self.response_prefix, *request.prompt.split()][
+            : request.max_tokens
+        ]
+        generated_text = " ".join(generated_tokens)
         completion_tokens = len(generated_text.split())
         total_latency_ms = float(10 + completion_tokens)
         tokens_per_second = round(completion_tokens / (total_latency_ms / 1000), 3)

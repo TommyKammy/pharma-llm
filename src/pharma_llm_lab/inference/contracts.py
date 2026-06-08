@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any
 
 
@@ -19,9 +20,17 @@ def require_non_empty_string(value: str, field_name: str) -> str:
 def require_non_negative_number(value: float | int | None, field_name: str) -> float | None:
     if value is None:
         return None
-    if not isinstance(value, int | float) or value < 0:
-        raise InferenceContractError(f"{field_name} must be a non-negative number")
+    if not isinstance(value, int | float) or value < 0 or not isfinite(value):
+        raise InferenceContractError(f"{field_name} must be a finite non-negative number")
     return float(value)
+
+
+def require_non_negative_int(value: int | None, field_name: str) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int) or value < 0:
+        raise InferenceContractError(f"{field_name} must be a non-negative integer")
+    return value
 
 
 @dataclass(frozen=True)
@@ -56,8 +65,8 @@ class InferenceTiming:
         require_non_negative_number(self.total_latency_ms, "total_latency_ms")
         require_non_negative_number(self.ttft_ms, "ttft_ms")
         require_non_negative_number(self.tokens_per_second, "tokens_per_second")
-        require_non_negative_number(self.prompt_tokens, "prompt_tokens")
-        require_non_negative_number(self.completion_tokens, "completion_tokens")
+        require_non_negative_int(self.prompt_tokens, "prompt_tokens")
+        require_non_negative_int(self.completion_tokens, "completion_tokens")
 
     def to_mapping(self) -> dict[str, float | int | None]:
         return {
@@ -82,8 +91,12 @@ class InferenceRequest:
         require_non_empty_string(self.request_id, "request_id")
         if not isinstance(self.max_tokens, int) or self.max_tokens < 1:
             raise InferenceContractError("max_tokens must be a positive integer")
-        if not isinstance(self.temperature, int | float) or self.temperature < 0:
-            raise InferenceContractError("temperature must be a non-negative number")
+        if (
+            not isinstance(self.temperature, int | float)
+            or self.temperature < 0
+            or not isfinite(self.temperature)
+        ):
+            raise InferenceContractError("temperature must be a finite non-negative number")
 
     def to_mapping(self) -> dict[str, Any]:
         return {
