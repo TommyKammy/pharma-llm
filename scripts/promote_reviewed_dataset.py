@@ -14,7 +14,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from pharma_llm_lab.dataset.schema import SchemaError, parse_record  # noqa: E402
-from pharma_llm_lab.dataset.provenance import ReviewStatus  # noqa: E402
+from pharma_llm_lab.dataset.provenance import ReviewStatus, SourceType  # noqa: E402
 from pharma_llm_lab.dataset.validators import (  # noqa: E402
     ValidationError,
     parse_dataset_type,
@@ -100,6 +100,11 @@ def prepared_record(raw_record: dict[str, Any]) -> dict[str, Any]:
 
 
 def review_workflow_policy_failure(record: Any) -> str | None:
+    if (
+        record.provenance.source_type is SourceType.HUMAN_EDITED_AI_ASSISTED
+        and record.provenance.review_status is ReviewStatus.APPROVED
+    ):
+        return "human_edited_ai_assisted requires edited_and_approved review"
     if (
         record.provenance.ai_assisted
         and record.provenance.review_status is ReviewStatus.APPROVED
@@ -294,6 +299,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.audit_output and paths_collide(args.audit_output, args.output):
         parser.error("--audit-output must not be the same path as output")
+    if args.audit_output and paths_collide(args.audit_output, args.input):
+        parser.error("--audit-output must not be the same path as input")
 
     result = promote_reviewed_dataset(
         args.input,
