@@ -115,6 +115,30 @@ included so local MLX and endpoint-compatible runs cannot be silently blended.
 The category CSV contains one row per Phase 4 category represented in the input,
 with counts and average latency, TTFT, tokens/sec, and scoring status counts.
 
+## Baseline Report
+
+Generate a Markdown report from one or more baseline prediction JSONL files:
+
+```bash
+uv run python scripts/generate_baseline_report.py \
+  --input \
+    /Users/tsinfra/Dev/pharma-llm/local/runs/baseline/qwen_predictions.jsonl \
+    /Users/tsinfra/Dev/pharma-llm/local/runs/baseline/gemma_predictions.jsonl \
+  --output results/reports/baseline_report.md
+```
+
+The report includes:
+
+- model comparison by model id, provider, adapter, run id, eval count, and scoring status
+- per-category counts and average latency, TTFT, and tokens/sec
+- notable failure modes such as empty completions and non-default scoring statuses
+- an Obsidian copy block for Phase notes
+- limitations that distinguish CI-safe mock data from real baseline results
+
+Interpret the report as the Phase 6 pre-LoRA reference only when it was produced
+from live baseline runs over the same eval ids. CI fixture reports validate the
+workflow shape, not model quality.
+
 ## Promptfoo Mock Config
 
 The promptfoo smoke config lives at:
