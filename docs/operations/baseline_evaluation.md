@@ -46,6 +46,13 @@ results/reports/
 Raw baseline prediction JSONL should stay in ignored local paths unless a small
 synthetic fixture is intentionally added for tests.
 
+Deterministic local baseline summaries may also be written under the ignored
+default path:
+
+```text
+results/baseline/
+```
+
 ## Real MLX Plug-in Point
 
 Later Phase 5 work should add a real MLX client that:
@@ -84,6 +91,27 @@ The runner emits JSONL records with:
 Supported CI-safe labels are `qwen-base`, `gemma-base`, and
 `endpoint-optional`. They are mock identities only; real model quality must not
 be inferred from these outputs.
+
+## Result Persistence
+
+Validate and aggregate baseline prediction JSONL with:
+
+```bash
+uv run python scripts/summarize_baseline_results.py \
+  --input /Users/tsinfra/Dev/pharma-llm/local/runs/baseline/mock_predictions.jsonl \
+  --summary-output /Users/tsinfra/Dev/pharma-llm/local/runs/baseline/summary.json \
+  --category-csv-output /Users/tsinfra/Dev/pharma-llm/local/runs/baseline/category_metrics.csv
+```
+
+The summarizer checks required identifiers and timing values before writing
+outputs. Required fields include `run_id`, `eval_id`, `category`, model id,
+provider, generated text, and finite non-negative total latency. Optional TTFT
+and tokens/sec values are aggregated when present.
+
+The summary JSON includes the run id, model id, total record count, scoring
+status counts, and per-category metrics. The category CSV contains one row per
+Phase 4 category represented in the input, with counts and average latency,
+TTFT, tokens/sec, and scoring status counts.
 
 ## Promptfoo Mock Config
 
