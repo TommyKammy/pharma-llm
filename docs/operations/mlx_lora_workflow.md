@@ -55,6 +55,24 @@ Use `data/prepared/sft_v0_1.manifest.json` to audit the dataset version,
 approved counts, output checksum, and Phase 4 eval-id fingerprint before
 starting a LoRA run.
 
+## Phase 6 Qwen LoRA Dry Run
+
+Use the Phase 6 config and runner to validate the local paths and planned
+`mlx_lm.lora` command before starting any 27B-class training job:
+
+```bash
+uv run python scripts/run_mlx_lora.py \
+  --config configs/mlx/qwen_sft_lora_r16.toml \
+  --dry-run \
+  --write-plan /Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/run_plan.json
+```
+
+The dry run requires the prepared SFT JSONL to exist, allows the Qwen model
+path to be absent for CI and pre-download checks, and refuses adapter/run output
+destinations outside `/Users/tsinfra/Dev/pharma-llm/local`. Real MLX LoRA
+execution is intentionally deferred to P6-004 after this command contract is
+reviewed.
+
 ## Initial Smoke Tests
 
 Phase 1 should start with a small model before any 27B-class experiment.
