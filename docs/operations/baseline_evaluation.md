@@ -92,6 +92,52 @@ Supported CI-safe labels are `qwen-base`, `gemma-base`, and
 `endpoint-optional`. They are mock identities only; real model quality must not
 be inferred from these outputs.
 
+## Real Qwen Baseline Plan
+
+Before Phase 6 LoRA training, prepare a real Qwen base baseline run plan:
+
+```bash
+uv run python scripts/run_qwen_baseline.py \
+  --dry-run \
+  --input evals/prompts/phase4_seed.jsonl \
+  --local-root /Users/tsinfra/Dev/pharma-llm/local/runs/baseline \
+  --model-path /Users/tsinfra/Dev/pharma-llm/local/models/qwen3.6-27b-base \
+  --run-id phase6-qwen-base \
+  --write-plan /Users/tsinfra/Dev/pharma-llm/local/runs/baseline/phase6-qwen-base/plan.json
+```
+
+The dry-run validates accepted Phase 4 eval records, records the eval count and
+ordered eval-id fingerprint, and fixes the local-only output paths:
+
+```text
+/Users/tsinfra/Dev/pharma-llm/local/runs/baseline/phase6-qwen-base/qwen_base_predictions.jsonl
+/Users/tsinfra/Dev/pharma-llm/local/runs/baseline/phase6-qwen-base/summary.json
+/Users/tsinfra/Dev/pharma-llm/local/runs/baseline/phase6-qwen-base/category_metrics.csv
+```
+
+The prediction JSONL is intentionally local-only. Use the same eval-id
+fingerprint when comparing base and LoRA outputs; reports must not compare
+different prompt subsets.
+
+After the real prediction JSONL exists, run:
+
+```bash
+uv run python scripts/summarize_baseline_results.py \
+  --input /Users/tsinfra/Dev/pharma-llm/local/runs/baseline/phase6-qwen-base/qwen_base_predictions.jsonl \
+  --summary-output /Users/tsinfra/Dev/pharma-llm/local/runs/baseline/phase6-qwen-base/summary.json \
+  --category-csv-output /Users/tsinfra/Dev/pharma-llm/local/runs/baseline/phase6-qwen-base/category_metrics.csv
+
+uv run python scripts/generate_baseline_report.py \
+  --input /Users/tsinfra/Dev/pharma-llm/local/runs/baseline/phase6-qwen-base/qwen_base_predictions.jsonl \
+  --output results/reports/qwen_base_baseline_report.md \
+  --mock-notice "Real Qwen base baseline run. Interpret quality only after confirming this uses the approved Phase 4 eval id set and local model path recorded in the run plan."
+```
+
+`scripts/run_qwen_baseline.py` does not download weights or execute the real
+model in CI. It is the reproducible operator plan for the local Qwen baseline
+artifact capture; real execution must write prediction records that satisfy the
+Phase 5 result schema.
+
 ## Result Persistence
 
 Validate and aggregate baseline prediction JSONL with:
