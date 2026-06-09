@@ -218,6 +218,28 @@ def test_export_sft_v0_1_rejects_duplicate_ids(tmp_path: Path) -> None:
     assert not manifest_path.exists()
 
 
+def test_export_sft_v0_1_removes_stale_artifacts_on_preflight_failure(
+    tmp_path: Path,
+) -> None:
+    records = approved_records()
+    reviewed_path = write_jsonl(tmp_path / "reviewed.jsonl", [records[0], records[0]])
+    output_path = tmp_path / "sft_v0_1.jsonl"
+    manifest_path = tmp_path / "sft_v0_1.manifest.json"
+    output_path.write_text("stale dataset\n", encoding="utf-8")
+    manifest_path.write_text("stale manifest\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="duplicate id"):
+        export_sft_v0_1(
+            input_path=reviewed_path,
+            output_path=output_path,
+            manifest_path=manifest_path,
+            eval_path=SEED_PATH,
+        )
+
+    assert not output_path.exists()
+    assert not manifest_path.exists()
+
+
 def test_export_sft_v0_1_rejects_missing_input(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="input path is not a file"):
         export_sft_v0_1(
@@ -226,6 +248,35 @@ def test_export_sft_v0_1_rejects_missing_input(tmp_path: Path) -> None:
             manifest_path=tmp_path / "sft_v0_1.manifest.json",
             eval_path=SEED_PATH,
         )
+
+
+@pytest.mark.parametrize("colliding_field", ["input", "output", "manifest"])
+def test_export_sft_v0_1_rejects_eval_path_collisions(
+    tmp_path: Path,
+    colliding_field: str,
+) -> None:
+    input_path = write_jsonl(tmp_path / "reviewed.jsonl", approved_records())
+    output_path = tmp_path / "sft_v0_1.jsonl"
+    manifest_path = tmp_path / "sft_v0_1.manifest.json"
+    eval_path = tmp_path / "eval.jsonl"
+    eval_path.write_text(SEED_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    if colliding_field == "input":
+        eval_path = input_path
+    if colliding_field == "output":
+        eval_path = output_path
+    if colliding_field == "manifest":
+        eval_path = manifest_path
+
+    with pytest.raises(ValueError, match=f"eval path must differ from {colliding_field} path"):
+        export_sft_v0_1(
+            input_path=input_path,
+            output_path=output_path,
+            manifest_path=manifest_path,
+            eval_path=eval_path,
+        )
+
+    assert not output_path.exists()
+    assert not manifest_path.exists()
 
 
 def test_export_sft_v0_1_cli_writes_manifest(tmp_path: Path) -> None:

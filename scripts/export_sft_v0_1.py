@@ -214,15 +214,20 @@ def export_sft_v0_1(
         raise ValueError("input and manifest paths must differ")
     if paths_collide(output_path, manifest_path):
         raise ValueError("output and manifest paths must differ")
-
-    validate_source_preflight(input_path)
-    result = promote_reviewed_dataset(
-        input_path,
-        output_path,
-        dataset_type_value="sft",
-    )
+    if paths_collide(eval_path, input_path):
+        raise ValueError("eval path must differ from input path")
+    if paths_collide(eval_path, output_path):
+        raise ValueError("eval path must differ from output path")
+    if paths_collide(eval_path, manifest_path):
+        raise ValueError("eval path must differ from manifest path")
 
     try:
+        validate_source_preflight(input_path)
+        result = promote_reviewed_dataset(
+            input_path,
+            output_path,
+            dataset_type_value="sft",
+        )
         require_complete_promotion(result)
         require_no_eval_leakage(eval_path=eval_path, output_path=output_path)
         manifest = build_manifest(
