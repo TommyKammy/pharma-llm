@@ -253,8 +253,11 @@ The export reuses `scripts/promote_reviewed_dataset.py` and adds a manifest with
 The prepared SFT JSONL shape for the training runner is:
 
 ```json
-{"id":"...","dataset_type":"sft","prompt":"...","response":"...","provenance":{...}}
+{"id":"...","dataset_type":"sft","prompt":"...","response":"...","completion":"...","provenance":{...}}
 ```
+
+`response` preserves the project SFT schema. `completion` mirrors `response` so
+MLX LM can read the file with its default completions format.
 
 The export is all-or-nothing: it rejects review candidates, duplicate ids,
 unapproved records, eval-only records, raw AI output, skipped source records,

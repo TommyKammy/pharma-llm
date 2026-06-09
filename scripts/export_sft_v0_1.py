@@ -168,6 +168,20 @@ def write_manifest(path: Path, manifest: SftExportManifest) -> None:
     )
 
 
+def add_completion_field(path: Path) -> None:
+    records: list[dict[str, Any]] = []
+    for _line_number, record in iter_jsonl(path):
+        response = record.get("response")
+        if not isinstance(response, str) or not response.strip():
+            raise ValueError("exported SFT record response must be a non-empty string")
+        record["completion"] = response
+        records.append(record)
+    path.write_text(
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in records) + "\n",
+        encoding="utf-8",
+    )
+
+
 def remove_export_artifacts(*paths: Path) -> None:
     for path in paths:
         path.unlink(missing_ok=True)
@@ -229,6 +243,7 @@ def export_sft_v0_1(
             dataset_type_value="sft",
         )
         require_complete_promotion(result)
+        add_completion_field(output_path)
         require_no_eval_leakage(eval_path=eval_path, output_path=output_path)
         manifest = build_manifest(
             input_path=input_path,
@@ -238,7 +253,7 @@ def export_sft_v0_1(
         )
         write_manifest(manifest_path, manifest)
         return manifest
-    except ValueError:
+    except (OSError, ValueError):
         remove_export_artifacts(output_path, manifest_path)
         raise
 

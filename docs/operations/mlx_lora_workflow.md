@@ -44,10 +44,11 @@ uv run python scripts/export_sft_v0_1.py \
 ```
 
 The runner-facing JSONL shape is deterministic and contains one SFT record per
-line:
+line. `response` preserves the project SFT schema, and `completion` mirrors it
+for the default MLX LM completions format:
 
 ```json
-{"id":"...","dataset_type":"sft","prompt":"...","response":"...","provenance":{...}}
+{"id":"...","dataset_type":"sft","prompt":"...","response":"...","completion":"...","provenance":{...}}
 ```
 
 Use `data/prepared/sft_v0_1.manifest.json` to audit the dataset version,

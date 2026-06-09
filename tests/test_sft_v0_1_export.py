@@ -68,6 +68,7 @@ def test_export_sft_v0_1_writes_prepared_dataset_and_manifest(tmp_path: Path) ->
         "phase3_argilla_sample_002",
     ]
     assert all(record["dataset_type"] == "sft" for record in prepared)
+    assert all(record["completion"] == record["response"] for record in prepared)
     assert all("argilla" not in record for record in prepared)
     assert all("original_record" not in record for record in prepared)
     assert manifest.dataset_version == DATASET_VERSION
@@ -198,6 +199,24 @@ def test_export_sft_v0_1_removes_artifacts_when_manifest_fails(tmp_path: Path) -
 
     assert not output_path.exists()
     assert not manifest_path.exists()
+
+
+def test_export_sft_v0_1_removes_output_when_manifest_write_fails(tmp_path: Path) -> None:
+    reviewed_path = write_jsonl(tmp_path / "reviewed.jsonl", approved_records())
+    output_path = tmp_path / "sft_v0_1.jsonl"
+    manifest_parent = tmp_path / "manifest-parent-is-file"
+    manifest_parent.write_text("not a directory\n", encoding="utf-8")
+    manifest_path = manifest_parent / "sft_v0_1.manifest.json"
+
+    with pytest.raises(OSError):
+        export_sft_v0_1(
+            input_path=reviewed_path,
+            output_path=output_path,
+            manifest_path=manifest_path,
+            eval_path=SEED_PATH,
+        )
+
+    assert not output_path.exists()
 
 
 def test_export_sft_v0_1_rejects_duplicate_ids(tmp_path: Path) -> None:
