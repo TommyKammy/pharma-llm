@@ -10,6 +10,9 @@ from pharma_llm_lab.baseline import (
     build_baseline_report,
     load_report_inputs,
 )
+from pharma_llm_lab.baseline.reports import notable_failure_modes
+from pharma_llm_lab.baseline.results import BaselineResult
+from pharma_llm_lab.dataset import EvaluationCategory
 from scripts.run_baseline_eval import run_mock_baseline, write_predictions
 
 SEED_PATH = Path("evals/prompts/phase4_seed.jsonl")
@@ -119,6 +122,51 @@ def test_baseline_report_rejects_malformed_metrics(tmp_path: Path) -> None:
         load_report_inputs((malformed_path,))
 
 
+def test_baseline_report_rejects_mismatched_eval_id_sets(tmp_path: Path) -> None:
+    qwen_path = write_mock_predictions(
+        tmp_path / "qwen.jsonl",
+        model_label="qwen-base",
+        run_id="qwen-fixture",
+    )
+    gemma_path = write_jsonl(
+        tmp_path / "gemma-subset.jsonl",
+        [
+            prediction_record(
+                run_id="gemma-fixture",
+                eval_id="eval_999",
+                model={
+                    "model_id": "google/gemma-4-26b-a4b-base",
+                    "provider": "mock-mlx",
+                    "adapter_id": None,
+                },
+            )
+        ],
+    )
+
+    with pytest.raises(BaselineResultError, match="same eval_id set"):
+        load_report_inputs((qwen_path, gemma_path))
+
+
+def test_notable_failure_modes_treat_whitespace_generation_as_empty() -> None:
+    result = BaselineResult(
+        run_id="fixture-run",
+        eval_id="eval_001",
+        category=EvaluationCategory.BUSINESS_SUMMARY,
+        model_id="qwen/qwen3.6-27b-base",
+        provider="mock-mlx",
+        adapter_id=None,
+        generated_text=" \n\t",
+        scoring_status="unscored",
+        total_latency_ms=10.0,
+        ttft_ms=1.0,
+        tokens_per_second=2.0,
+    )
+
+    assert notable_failure_modes((result,)) == (
+        "1 empty completion(s) preserved for inspection",
+    )
+
+
 def test_baseline_report_cli_writes_markdown(tmp_path: Path) -> None:
     qwen_path = write_mock_predictions(
         tmp_path / "qwen.jsonl",
@@ -147,3 +195,12 @@ def test_baseline_report_cli_writes_markdown(tmp_path: Path) -> None:
     assert "# Baseline Evaluation Report" in report
     assert "qwen/qwen3.6-27b-base" in report
     assert "business_summary" in report
+
+
+def test_default_baseline_report_path_is_trackable() -> None:
+    result = subprocess.run(
+        ["git", "check-ignore", "-q", "results/reports/baseline_report.md"],
+        check=False,
+    )
+
+    assert result.returncode == 1

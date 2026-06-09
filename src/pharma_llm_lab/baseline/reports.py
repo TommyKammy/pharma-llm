@@ -17,6 +17,7 @@ from pharma_llm_lab.baseline.results import (
 @dataclass(frozen=True)
 class BaselineReportInput:
     source_path: Path
+    results: tuple[BaselineResult, ...]
     summary: BaselineSummary
 
 
@@ -26,16 +27,34 @@ def load_report_inputs(paths: tuple[Path, ...]) -> tuple[BaselineReportInput, ..
 
     report_inputs: list[BaselineReportInput] = []
     seen_model_keys: set[tuple[str, str, str | None]] = set()
+    reference_eval_ids: set[str] | None = None
     for path in paths:
         results = load_baseline_results(path)
         summary = aggregate_results(results)
+        eval_ids = {result.eval_id for result in results}
+        if reference_eval_ids is None:
+            reference_eval_ids = eval_ids
+        elif eval_ids != reference_eval_ids:
+            missing = sorted(reference_eval_ids - eval_ids)
+            extra = sorted(eval_ids - reference_eval_ids)
+            detail = []
+            if missing:
+                detail.append("missing eval_id(s): " + ", ".join(missing))
+            if extra:
+                detail.append("extra eval_id(s): " + ", ".join(extra))
+            raise BaselineResultError(
+                "baseline report inputs must cover the same eval_id set"
+                + (": " + "; ".join(detail) if detail else "")
+            )
         model_key = (summary.model_id, summary.provider, summary.adapter_id)
         if model_key in seen_model_keys:
             raise BaselineResultError(
                 "baseline report inputs must contain unique model identities"
             )
         seen_model_keys.add(model_key)
-        report_inputs.append(BaselineReportInput(source_path=path, summary=summary))
+        report_inputs.append(
+            BaselineReportInput(source_path=path, results=results, summary=summary)
+        )
 
     return tuple(report_inputs)
 
@@ -62,7 +81,7 @@ def markdown_row(cells: list[object]) -> str:
 
 def notable_failure_modes(results: tuple[BaselineResult, ...]) -> tuple[str, ...]:
     failures: list[str] = []
-    empty_count = sum(1 for result in results if result.generated_text == "")
+    empty_count = sum(1 for result in results if not result.generated_text.strip())
     non_unscored = sorted(
         {
             result.scoring_status
@@ -184,10 +203,9 @@ def build_baseline_report(
 
     lines.extend(["## Notable Failure Modes", ""])
     for item in report_inputs:
-        results = load_baseline_results(item.source_path)
         lines.append(f"### {item.summary.model_id}")
         lines.append("")
-        for failure in notable_failure_modes(results):
+        for failure in notable_failure_modes(item.results):
             lines.append(f"- {failure}")
         lines.append("")
 

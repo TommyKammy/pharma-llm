@@ -135,6 +135,11 @@ The report includes:
 - an Obsidian copy block for Phase notes
 - limitations that distinguish CI-safe mock data from real baseline results
 
+When multiple prediction files are supplied, each file must cover the same
+`eval_id` set. This prevents side-by-side Qwen/Gemma reports from comparing
+different prompt subsets. The default `results/reports/baseline_report.md`
+output is intentionally trackable as a lightweight Markdown report.
+
 Interpret the report as the Phase 6 pre-LoRA reference only when it was produced
 from live baseline runs over the same eval ids. CI fixture reports validate the
 workflow shape, not model quality.
