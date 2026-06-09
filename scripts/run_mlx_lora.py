@@ -54,8 +54,8 @@ class MlxLoraTrainingPlan:
     def mlx_config_mapping(self) -> dict[str, Any]:
         return {
             "model": str(self.model_path),
-            "train": True,
             "mask_prompt": self.mask_prompt,
+            "train": True,
             "data": str(self.mlx_data_dir),
             "adapter_path": str(self.adapter_path),
             "iters": self.iters,

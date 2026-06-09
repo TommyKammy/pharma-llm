@@ -210,6 +210,7 @@ def test_cli_dry_run_writes_plan(tmp_path: Path) -> None:
     file_plan = json.loads(plan_path.read_text(encoding="utf-8"))
     assert stdout_plan == file_plan
     assert stdout_plan["safety"]["executes_training"] is False
+    assert stdout_plan["mlx_config"]["mask_prompt"] is True
     assert stdout_plan["planned_command"][0] == "mlx_lm.lora"
     assert (local_root / "runs" / "phase6-test" / "mlx_data" / "train.jsonl").is_file()
     assert not (local_root / "runs" / "phase6-test" / "mlx_data" / "valid.jsonl").exists()
