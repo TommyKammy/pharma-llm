@@ -184,13 +184,15 @@ def require_qwen_target_modules(section: dict[str, Any]) -> tuple[str, ...]:
     for item in value:
         if not isinstance(item, str) or not item.strip():
             raise ValueError("training.target_modules must be a non-empty string list")
-        if item not in QWEN_TARGET_MODULE_KEYS:
-            allowed = ", ".join(sorted(QWEN_TARGET_MODULE_KEYS))
-            raise ValueError(
-                "training.target_modules must use qualified Phase 6 Qwen MLX module keys: "
-                + allowed
-            )
         modules.append(item)
+    unknown_modules = sorted(set(modules) - QWEN_TARGET_MODULE_KEYS)
+    if unknown_modules:
+        allowed = ", ".join(sorted(QWEN_TARGET_MODULE_KEYS))
+        unknown = ", ".join(unknown_modules)
+        raise ValueError(
+            "training.target_modules contains unsupported or unqualified Qwen MLX module "
+            f"key(s): {unknown}; allowed keys: {allowed}"
+        )
     return tuple(modules)
 
 
@@ -358,6 +360,12 @@ def dump_simple_yaml(mapping: dict[str, Any]) -> str:
 
 
 def materialize_local_inputs(plan: MlxLoraTrainingPlan) -> None:
+    require_artifact_paths_do_not_collide(
+        adapter_path=plan.adapter_path,
+        run_output_path=plan.run_output_path,
+        mlx_config_path=plan.mlx_config_path,
+        mlx_data_dir=plan.mlx_data_dir,
+    )
     train_data = plan.dataset_path.read_bytes()
     plan.mlx_data_dir.mkdir(parents=True, exist_ok=True)
     plan.mlx_config_path.parent.mkdir(parents=True, exist_ok=True)

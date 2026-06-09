@@ -158,7 +158,7 @@ def test_build_plan_rejects_unqualified_target_modules(tmp_path: Path) -> None:
         target_modules='"q_proj"',
     )
 
-    with pytest.raises(ValueError, match="Phase 6 Qwen MLX module keys"):
+    with pytest.raises(ValueError, match="unsupported or unqualified Qwen MLX module"):
         build_plan(config_path=config_path, local_root=local_root)
 
 
