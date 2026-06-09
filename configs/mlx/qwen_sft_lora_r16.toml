@@ -10,6 +10,8 @@ dataset_path = "data/prepared/sft_v0_1.jsonl"
 [output]
 adapter_path = "/Users/tsinfra/Dev/pharma-llm/local/adapters/qwen_sft_lora_r16_v1"
 run_output_path = "/Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/run_plan.json"
+mlx_data_dir = "/Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/mlx_data"
+mlx_config_path = "/Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/mlx_lora_config.yaml"
 
 [training]
 rank = 16

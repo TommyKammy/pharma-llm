@@ -69,9 +69,14 @@ uv run python scripts/run_mlx_lora.py \
 
 The dry run requires the prepared SFT JSONL to exist, allows the Qwen model
 path to be absent for CI and pre-download checks, and refuses adapter/run output
-destinations outside `/Users/tsinfra/Dev/pharma-llm/local`. Real MLX LoRA
-execution is intentionally deferred to P6-004 after this command contract is
-reviewed.
+destinations outside `/Users/tsinfra/Dev/pharma-llm/local`. It materializes the
+MLX-facing local inputs under the configured run directory: the approved SFT
+JSONL is copied to `mlx_data/train.jsonl`, and the reviewed LoRA settings are
+written to `mlx_lora_config.yaml` with `lora_parameters.rank` and
+`lora_parameters.target_modules`. The planned command points at that local YAML
+config, so the validated settings and the eventual MLX invocation stay aligned.
+Real MLX LoRA execution is intentionally deferred to P6-004 after this command
+contract is reviewed.
 
 ## Initial Smoke Tests
 

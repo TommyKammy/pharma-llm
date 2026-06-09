@@ -38,6 +38,8 @@ dataset_path = "{dataset_path}"
 [output]
 adapter_path = "{adapter}"
 run_output_path = "{run_output}"
+mlx_data_dir = "{local_root / "runs" / "phase6-test" / "mlx_data"}"
+mlx_config_path = "{local_root / "runs" / "phase6-test" / "mlx_lora_config.yaml"}"
 
 [training]
 rank = {rank}
@@ -72,14 +74,18 @@ def test_build_plan_validates_config_and_planned_command(tmp_path: Path) -> None
     assert plan.target_modules == ("q_proj", "v_proj")
     assert plan.adapter_path == (local_root / "adapters" / "phase6-test").resolve()
     command = plan.command()
-    assert command[:3] == [
+    assert command == [
         "mlx_lm.lora",
-        "--model",
-        str((local_root / "models" / "qwen").resolve()),
+        "--config",
+        str((local_root / "runs" / "phase6-test" / "mlx_lora_config.yaml").resolve()),
     ]
-    assert "--train" in command
-    assert "--adapter-path" in command
-    assert command[command.index("--data") + 1] == str(dataset_path.parent.resolve())
+    assert plan.train_data_path == (
+        local_root / "runs" / "phase6-test" / "mlx_data" / "train.jsonl"
+    ).resolve()
+    assert plan.mlx_config_mapping()["lora_parameters"] == {
+        "rank": 16,
+        "target_modules": ["q_proj", "v_proj"],
+    }
 
 
 def test_build_plan_rejects_missing_dataset(tmp_path: Path) -> None:
@@ -99,6 +105,19 @@ def test_build_plan_rejects_invalid_training_field(tmp_path: Path) -> None:
     write_config(config_path, dataset_path=dataset_path, local_root=local_root, rank=0)
 
     with pytest.raises(ValueError, match="training.rank must be a positive integer"):
+        build_plan(config_path=config_path, local_root=local_root)
+
+
+def test_build_plan_rejects_bool_integer_field(tmp_path: Path) -> None:
+    local_root = tmp_path / "local"
+    dataset_path = tmp_path / "sft_v0_1.jsonl"
+    config_path = tmp_path / "lora.toml"
+    write_dataset(dataset_path)
+    write_config(config_path, dataset_path=dataset_path, local_root=local_root)
+    text = config_path.read_text(encoding="utf-8").replace("iters = 2", "iters = true")
+    config_path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="training.iters must be a positive integer"):
         build_plan(config_path=config_path, local_root=local_root)
 
 
@@ -140,7 +159,7 @@ def test_cli_dry_run_writes_plan(tmp_path: Path) -> None:
     local_root = tmp_path / "local"
     dataset_path = tmp_path / "sft_v0_1.jsonl"
     config_path = tmp_path / "lora.toml"
-    plan_path = tmp_path / "plan.json"
+    plan_path = local_root / "runs" / "phase6-test" / "plan.json"
     write_dataset(dataset_path)
     write_config(config_path, dataset_path=dataset_path, local_root=local_root)
 
@@ -167,3 +186,39 @@ def test_cli_dry_run_writes_plan(tmp_path: Path) -> None:
     assert stdout_plan == file_plan
     assert stdout_plan["safety"]["executes_training"] is False
     assert stdout_plan["planned_command"][0] == "mlx_lm.lora"
+    assert (local_root / "runs" / "phase6-test" / "mlx_data" / "train.jsonl").is_file()
+    assert (local_root / "runs" / "phase6-test" / "mlx_lora_config.yaml").is_file()
+    yaml_text = (local_root / "runs" / "phase6-test" / "mlx_lora_config.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "rank: 16" in yaml_text
+    assert "  target_modules:" in yaml_text
+
+
+def test_cli_rejects_write_plan_outside_local_root(tmp_path: Path) -> None:
+    local_root = tmp_path / "local"
+    dataset_path = tmp_path / "sft_v0_1.jsonl"
+    config_path = tmp_path / "lora.toml"
+    write_dataset(dataset_path)
+    write_config(config_path, dataset_path=dataset_path, local_root=local_root)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/run_mlx_lora.py",
+            "--config",
+            str(config_path),
+            "--local-root",
+            str(local_root),
+            "--dry-run",
+            "--write-plan",
+            str(tmp_path / "run_plan.json"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "--write-plan must be under local artifact root" in result.stderr
+    assert not (local_root / "runs" / "phase6-test" / "mlx_data").exists()

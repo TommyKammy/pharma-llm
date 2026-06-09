@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,8 @@ class MlxLoraTrainingPlan:
     dataset_path: Path
     adapter_path: Path
     run_output_path: Path
+    mlx_data_dir: Path
+    mlx_config_path: Path
     rank: int
     target_modules: tuple[str, ...]
     epochs: int
@@ -36,35 +39,37 @@ class MlxLoraTrainingPlan:
     steps_per_eval: int
     save_every: int
 
+    @property
+    def train_data_path(self) -> Path:
+        return self.mlx_data_dir / "train.jsonl"
+
     def command(self) -> list[str]:
         return [
             "mlx_lm.lora",
-            "--model",
-            str(self.model_path),
-            "--train",
-            "--data",
-            str(self.dataset_path.parent),
-            "--adapter-path",
-            str(self.adapter_path),
-            "--iters",
-            str(self.iters),
-            "--batch-size",
-            str(self.batch_size),
-            "--num-layers",
-            str(self.num_layers),
-            "--max-seq-length",
-            str(self.max_seq_length),
-            "--learning-rate",
-            str(self.learning_rate),
-            "--steps-per-report",
-            str(self.steps_per_report),
-            "--steps-per-eval",
-            str(self.steps_per_eval),
-            "--save-every",
-            str(self.save_every),
-            "--seed",
-            str(self.seed),
+            "--config",
+            str(self.mlx_config_path),
         ]
+
+    def mlx_config_mapping(self) -> dict[str, Any]:
+        return {
+            "model": str(self.model_path),
+            "train": True,
+            "data": str(self.mlx_data_dir),
+            "adapter_path": str(self.adapter_path),
+            "iters": self.iters,
+            "batch_size": self.batch_size,
+            "num_layers": self.num_layers,
+            "max_seq_length": self.max_seq_length,
+            "learning_rate": self.learning_rate,
+            "steps_per_report": self.steps_per_report,
+            "steps_per_eval": self.steps_per_eval,
+            "save_every": self.save_every,
+            "seed": self.seed,
+            "lora_parameters": {
+                "rank": self.rank,
+                "target_modules": list(self.target_modules),
+            },
+        }
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -75,6 +80,10 @@ class MlxLoraTrainingPlan:
             "dataset_path": str(self.dataset_path),
             "adapter_path": str(self.adapter_path),
             "run_output_path": str(self.run_output_path),
+            "mlx_data_dir": str(self.mlx_data_dir),
+            "train_data_path": str(self.train_data_path),
+            "mlx_config_path": str(self.mlx_config_path),
+            "mlx_config": self.mlx_config_mapping(),
             "training": {
                 "rank": self.rank,
                 "target_modules": list(self.target_modules),
@@ -95,6 +104,7 @@ class MlxLoraTrainingPlan:
                 "large_artifacts_root": str(self.local_root),
                 "model_exists": self.model_path.exists(),
                 "dataset_exists": self.dataset_path.exists(),
+                "materializes_local_inputs": True,
                 "executes_training": False,
             },
         }
@@ -125,7 +135,7 @@ def require_string(section: dict[str, Any], key: str, *, section_name: str) -> s
 
 def require_positive_int(section: dict[str, Any], key: str, *, section_name: str) -> int:
     value = section.get(key)
-    if not isinstance(value, int) or value < 1:
+    if type(value) is not int or value < 1:
         raise ValueError(f"{section_name}.{key} must be a positive integer")
     return value
 
@@ -199,6 +209,16 @@ def build_plan(
         local_root,
         "output.run_output_path",
     )
+    mlx_data_dir = require_under_root(
+        resolve_path(output.get("mlx_data_dir"), field_name="output.mlx_data_dir"),
+        local_root,
+        "output.mlx_data_dir",
+    )
+    mlx_config_path = require_under_root(
+        resolve_path(output.get("mlx_config_path"), field_name="output.mlx_config_path"),
+        local_root,
+        "output.mlx_config_path",
+    )
 
     if not dataset_path.is_file():
         raise ValueError(f"data.dataset_path must exist and be a file: {dataset_path}")
@@ -213,6 +233,8 @@ def build_plan(
         dataset_path=dataset_path,
         adapter_path=adapter_path,
         run_output_path=run_output_path,
+        mlx_data_dir=mlx_data_dir,
+        mlx_config_path=mlx_config_path,
         rank=require_positive_int(training, "rank", section_name="training"),
         target_modules=require_target_modules(training),
         epochs=require_positive_int(training, "epochs", section_name="training"),
@@ -225,6 +247,44 @@ def build_plan(
         steps_per_report=require_positive_int(training, "steps_per_report", section_name="training"),
         steps_per_eval=require_positive_int(training, "steps_per_eval", section_name="training"),
         save_every=require_positive_int(training, "save_every", section_name="training"),
+    )
+
+
+def yaml_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int | float):
+        return str(value)
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def dump_simple_yaml(mapping: dict[str, Any]) -> str:
+    lines: list[str] = []
+    for key, value in mapping.items():
+        if isinstance(value, dict):
+            lines.append(f"{key}:")
+            for nested_key, nested_value in value.items():
+                if isinstance(nested_value, list):
+                    lines.append(f"  {nested_key}:")
+                    lines.extend(f"    - {yaml_scalar(item)}" for item in nested_value)
+                else:
+                    lines.append(f"  {nested_key}: {yaml_scalar(nested_value)}")
+        elif isinstance(value, list):
+            lines.append(f"{key}:")
+            lines.extend(f"  - {yaml_scalar(item)}" for item in value)
+        else:
+            lines.append(f"{key}: {yaml_scalar(value)}")
+    return "\n".join(lines) + "\n"
+
+
+def materialize_local_inputs(plan: MlxLoraTrainingPlan) -> None:
+    plan.mlx_data_dir.mkdir(parents=True, exist_ok=True)
+    plan.mlx_config_path.parent.mkdir(parents=True, exist_ok=True)
+    if plan.dataset_path != plan.train_data_path:
+        shutil.copyfile(plan.dataset_path, plan.train_data_path)
+    plan.mlx_config_path.write_text(
+        dump_simple_yaml(plan.mlx_config_mapping()),
+        encoding="utf-8",
     )
 
 
@@ -264,11 +324,17 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         plan = build_plan(config_path=args.config, local_root=args.local_root)
+        write_plan_path = (
+            require_under_root(args.write_plan, plan.local_root, "--write-plan")
+            if args.write_plan is not None
+            else None
+        )
+        materialize_local_inputs(plan)
     except (OSError, ValueError, tomllib.TOMLDecodeError) as exc:
         parser.error(str(exc))
 
-    if args.write_plan is not None:
-        write_plan(args.write_plan, plan)
+    if write_plan_path is not None:
+        write_plan(write_plan_path, plan)
     print(json.dumps(plan.to_mapping(), ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
