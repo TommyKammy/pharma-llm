@@ -227,3 +227,35 @@ outputs, skips policy-blocked records with explicit reasons, and fails without
 writing output when the reviewed input contains malformed records or when no
 records can be promoted. Promotion targets are limited to `sft`, `dpo`, and `cpt`;
 `eval` remains reviewable but cannot be promoted into training data.
+
+## Phase 6 SFT v0.1 Export
+
+Phase 6 wraps the approved-only promotion path with a versioned SFT export for
+Qwen LoRA training:
+
+```bash
+uv run python scripts/export_sft_v0_1.py \
+  /Users/tsinfra/Dev/pharma-llm/local/argilla/phase6_reviewed_sft.jsonl \
+  --output data/prepared/sft_v0_1.jsonl \
+  --manifest data/prepared/sft_v0_1.manifest.json \
+  --eval-path evals/prompts/phase4_seed.jsonl
+```
+
+The export reuses `scripts/promote_reviewed_dataset.py` and adds a manifest with:
+
+- dataset version and dataset type
+- source count and promoted / skipped / failed counts
+- approved and edited-and-approved counts
+- output SHA-256
+- Phase 4 eval count and ordered eval-id fingerprint
+- local artifact policy for raw exports and model artifacts
+
+The prepared SFT JSONL shape for the training runner is:
+
+```json
+{"id":"...","dataset_type":"sft","prompt":"...","response":"...","provenance":{...}}
+```
+
+The export rejects review candidates, duplicate ids, unapproved records,
+eval-only records, raw AI output, and other training-policy violations before
+writing the manifest.
