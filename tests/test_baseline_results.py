@@ -85,16 +85,31 @@ def test_baseline_results_validate_and_aggregate_seed_fixture(tmp_path: Path) ->
     assert all(metrics.avg_total_latency_ms > 0 for metrics in summary.category_metrics)
 
 
+def test_baseline_results_accept_empty_generated_text(tmp_path: Path) -> None:
+    path = write_jsonl(
+        tmp_path / "empty-completion.jsonl",
+        [prediction_record(generated_text="")],
+    )
+
+    results = load_baseline_results(path)
+
+    assert results[0].generated_text == ""
+
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
         (lambda record: record.pop("eval_id"), "eval_id must be a non-empty string"),
         (lambda record: record.pop("category"), "category must be a non-empty string"),
         (lambda record: record["model"].pop("model_id"), "model_id must be a non-empty string"),
-        (lambda record: record.pop("generated_text"), "generated_text must be a non-empty string"),
+        (lambda record: record.pop("generated_text"), "generated_text must be a string"),
         (
             lambda record: record["timing"].update({"total_latency_ms": -1}),
             "timing.total_latency_ms must be a finite non-negative number",
+        ),
+        (
+            lambda record: record["timing"].update({"ttft_ms": True}),
+            "timing.ttft_ms must be a finite non-negative number",
         ),
     ],
 )
@@ -111,7 +126,28 @@ def test_baseline_results_reject_invalid_prediction_records(
         load_baseline_results(path)
 
 
-def test_baseline_results_reject_mixed_run_or_model(tmp_path: Path) -> None:
+def test_baseline_results_report_malformed_jsonl(tmp_path: Path) -> None:
+    path = tmp_path / "malformed.jsonl"
+    path.write_text('{"run_id": "fixture-run"\n', encoding="utf-8")
+
+    with pytest.raises(BaselineResultError, match="malformed JSON"):
+        load_baseline_results(path)
+
+
+def test_baseline_results_reject_duplicate_eval_ids(tmp_path: Path) -> None:
+    path = write_jsonl(
+        tmp_path / "duplicate-eval-id.jsonl",
+        [
+            prediction_record(eval_id="eval_001"),
+            prediction_record(eval_id="eval_001"),
+        ],
+    )
+
+    with pytest.raises(BaselineResultError, match="unique eval_id"):
+        aggregate_results(load_baseline_results(path))
+
+
+def test_baseline_results_reject_mixed_model_identity(tmp_path: Path) -> None:
     mixed_run_path = write_jsonl(
         tmp_path / "mixed.jsonl",
         [
@@ -136,6 +172,38 @@ def test_baseline_results_reject_mixed_run_or_model(tmp_path: Path) -> None:
 
     with pytest.raises(BaselineResultError, match="exactly one model_id"):
         aggregate_results(load_baseline_results(mixed_model_path))
+
+    mixed_provider_path = write_jsonl(
+        tmp_path / "mixed-provider.jsonl",
+        [
+            prediction_record(eval_id="eval_001"),
+            prediction_record(
+                eval_id="eval_002",
+                model={"model_id": "qwen/qwen3.6-27b-base", "provider": "endpoint"},
+            ),
+        ],
+    )
+
+    with pytest.raises(BaselineResultError, match="exactly one provider"):
+        aggregate_results(load_baseline_results(mixed_provider_path))
+
+    mixed_adapter_path = write_jsonl(
+        tmp_path / "mixed-adapter.jsonl",
+        [
+            prediction_record(eval_id="eval_001"),
+            prediction_record(
+                eval_id="eval_002",
+                model={
+                    "model_id": "qwen/qwen3.6-27b-base",
+                    "provider": "mock-mlx",
+                    "adapter_id": "adapter-a",
+                },
+            ),
+        ],
+    )
+
+    with pytest.raises(BaselineResultError, match="exactly one adapter_id"):
+        aggregate_results(load_baseline_results(mixed_adapter_path))
 
 
 def test_baseline_results_write_summary_json_and_category_csv(tmp_path: Path) -> None:

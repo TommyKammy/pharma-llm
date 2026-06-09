@@ -105,13 +105,15 @@ uv run python scripts/summarize_baseline_results.py \
 
 The summarizer checks required identifiers and timing values before writing
 outputs. Required fields include `run_id`, `eval_id`, `category`, model id,
-provider, generated text, and finite non-negative total latency. Optional TTFT
-and tokens/sec values are aggregated when present.
+provider, generated text, and finite non-negative total latency. Empty
+generated text is preserved as a valid baseline outcome. Optional TTFT and
+tokens/sec values are aggregated when present.
 
 The summary JSON includes the run id, model id, total record count, scoring
-status counts, and per-category metrics. The category CSV contains one row per
-Phase 4 category represented in the input, with counts and average latency,
-TTFT, tokens/sec, and scoring status counts.
+status counts, and per-category metrics. Provider and adapter identity are also
+included so local MLX and endpoint-compatible runs cannot be silently blended.
+The category CSV contains one row per Phase 4 category represented in the input,
+with counts and average latency, TTFT, tokens/sec, and scoring status counts.
 
 ## Promptfoo Mock Config
 

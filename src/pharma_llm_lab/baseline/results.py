@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+from collections import Counter
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
@@ -23,6 +24,13 @@ def require_string(mapping: dict[str, Any], key: str) -> str:
     return value
 
 
+def require_present_string(mapping: dict[str, Any], key: str) -> str:
+    value = mapping.get(key)
+    if not isinstance(value, str):
+        raise BaselineResultError(f"{key} must be a string")
+    return value
+
+
 def require_mapping(mapping: dict[str, Any], key: str) -> dict[str, Any]:
     value = mapping.get(key)
     if not isinstance(value, dict):
@@ -31,7 +39,12 @@ def require_mapping(mapping: dict[str, Any], key: str) -> dict[str, Any]:
 
 
 def require_finite_non_negative_number(value: Any, field_name: str) -> float:
-    if not isinstance(value, int | float) or value < 0 or not isfinite(value):
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or value < 0
+        or not isfinite(value)
+    ):
         raise BaselineResultError(f"{field_name} must be a finite non-negative number")
     return float(value)
 
@@ -49,6 +62,7 @@ class BaselineResult:
     category: EvaluationCategory
     model_id: str
     provider: str
+    adapter_id: str | None
     generated_text: str
     scoring_status: str
     total_latency_ms: float
@@ -69,6 +83,9 @@ class BaselineResult:
         scoring_status = mapping.get("scoring_status", "unscored")
         if not isinstance(scoring_status, str) or not scoring_status.strip():
             raise BaselineResultError("scoring_status must be a non-empty string")
+        adapter_id = model.get("adapter_id")
+        if adapter_id is not None and not isinstance(adapter_id, str):
+            raise BaselineResultError("adapter_id must be null or a string")
 
         return cls(
             run_id=require_string(mapping, "run_id"),
@@ -76,7 +93,8 @@ class BaselineResult:
             category=category,
             model_id=require_string(model, "model_id"),
             provider=require_string(model, "provider"),
-            generated_text=require_string(mapping, "generated_text"),
+            adapter_id=adapter_id,
+            generated_text=require_present_string(mapping, "generated_text"),
             scoring_status=scoring_status,
             total_latency_ms=require_finite_non_negative_number(
                 timing.get("total_latency_ms"), "timing.total_latency_ms"
@@ -96,6 +114,7 @@ class BaselineResult:
             "category": self.category.value,
             "model_id": self.model_id,
             "provider": self.provider,
+            "adapter_id": self.adapter_id,
             "generated_text": self.generated_text,
             "scoring_status": self.scoring_status,
             "total_latency_ms": self.total_latency_ms,
@@ -108,6 +127,8 @@ class BaselineResult:
 class CategoryMetrics:
     run_id: str
     model_id: str
+    provider: str
+    adapter_id: str | None
     category: EvaluationCategory
     count: int
     avg_total_latency_ms: float
@@ -119,6 +140,8 @@ class CategoryMetrics:
         return {
             "run_id": self.run_id,
             "model_id": self.model_id,
+            "provider": self.provider,
+            "adapter_id": self.adapter_id,
             "category": self.category.value,
             "count": self.count,
             "avg_total_latency_ms": self.avg_total_latency_ms,
@@ -132,6 +155,8 @@ class CategoryMetrics:
 class BaselineSummary:
     run_id: str
     model_id: str
+    provider: str
+    adapter_id: str | None
     total_count: int
     category_metrics: tuple[CategoryMetrics, ...]
     scoring_status_counts: dict[str, int]
@@ -140,6 +165,8 @@ class BaselineSummary:
         return {
             "run_id": self.run_id,
             "model_id": self.model_id,
+            "provider": self.provider,
+            "adapter_id": self.adapter_id,
             "total_count": self.total_count,
             "scoring_status_counts": dict(sorted(self.scoring_status_counts.items())),
             "category_metrics": [
@@ -153,7 +180,12 @@ def iter_jsonl(path: Path) -> Iterable[tuple[int, dict[str, Any]]]:
         for line_number, line in enumerate(handle, start=1):
             if not line.strip():
                 continue
-            value = json.loads(line)
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise BaselineResultError(
+                    f"{path}:{line_number}: malformed JSON: {exc.msg}"
+                ) from exc
             if not isinstance(value, dict):
                 raise BaselineResultError(f"{path}:{line_number}: record must be an object")
             yield line_number, value
@@ -191,10 +223,25 @@ def aggregate_results(results: tuple[BaselineResult, ...]) -> BaselineSummary:
 
     run_ids = {result.run_id for result in results}
     model_ids = {result.model_id for result in results}
+    providers = {result.provider for result in results}
+    adapter_ids = {result.adapter_id for result in results}
+    eval_id_counts = Counter(result.eval_id for result in results)
+    duplicate_eval_ids = sorted(
+        eval_id for eval_id, count in eval_id_counts.items() if count > 1
+    )
     if len(run_ids) != 1:
         raise BaselineResultError("baseline results must contain exactly one run_id")
     if len(model_ids) != 1:
         raise BaselineResultError("baseline results must contain exactly one model_id")
+    if len(providers) != 1:
+        raise BaselineResultError("baseline results must contain exactly one provider")
+    if len(adapter_ids) != 1:
+        raise BaselineResultError("baseline results must contain exactly one adapter_id")
+    if duplicate_eval_ids:
+        raise BaselineResultError(
+            "baseline results must contain unique eval_id values: "
+            + ", ".join(duplicate_eval_ids)
+        )
 
     category_metrics: list[CategoryMetrics] = []
     scoring_status_counts: dict[str, int] = {}
@@ -212,6 +259,8 @@ def aggregate_results(results: tuple[BaselineResult, ...]) -> BaselineSummary:
             CategoryMetrics(
                 run_id=category_results[0].run_id,
                 model_id=category_results[0].model_id,
+                provider=category_results[0].provider,
+                adapter_id=category_results[0].adapter_id,
                 category=category,
                 count=len(category_results),
                 avg_total_latency_ms=average(
@@ -239,6 +288,8 @@ def aggregate_results(results: tuple[BaselineResult, ...]) -> BaselineSummary:
     return BaselineSummary(
         run_id=results[0].run_id,
         model_id=results[0].model_id,
+        provider=results[0].provider,
+        adapter_id=results[0].adapter_id,
         total_count=len(results),
         category_metrics=tuple(category_metrics),
         scoring_status_counts=scoring_status_counts,
@@ -262,6 +313,8 @@ def write_category_metrics_csv(path: Path, summary: BaselineSummary) -> None:
             fieldnames=[
                 "run_id",
                 "model_id",
+                "provider",
+                "adapter_id",
                 "category",
                 "count",
                 "avg_total_latency_ms",
