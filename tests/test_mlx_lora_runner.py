@@ -226,6 +226,36 @@ def test_cli_dry_run_writes_plan(tmp_path: Path) -> None:
     assert '    - "self_attn.q_proj"' in yaml_text
 
 
+def test_cli_dry_run_writes_configured_plan_without_write_plan_arg(tmp_path: Path) -> None:
+    local_root = tmp_path / "local"
+    dataset_path = tmp_path / "sft_v0_1.jsonl"
+    config_path = tmp_path / "lora.toml"
+    plan_path = local_root / "runs" / "phase6-test" / "run_plan.json"
+    write_dataset(dataset_path)
+    write_config(config_path, dataset_path=dataset_path, local_root=local_root)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/run_mlx_lora.py",
+            "--config",
+            str(config_path),
+            "--local-root",
+            str(local_root),
+            "--dry-run",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    stdout_plan = json.loads(result.stdout)
+    file_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    assert stdout_plan == file_plan
+    assert file_plan["run_output_path"] == str(plan_path.resolve())
+
+
 def test_cli_rejects_write_plan_that_differs_from_configured_run_output(tmp_path: Path) -> None:
     local_root = tmp_path / "local"
     dataset_path = tmp_path / "sft_v0_1.jsonl"

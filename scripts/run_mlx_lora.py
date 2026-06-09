@@ -351,7 +351,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--write-plan",
         type=Path,
         default=None,
-        help="Optional JSON path for the generated run plan.",
+        help=(
+            "Optional assertion for the JSON run plan path. When supplied, it must equal "
+            "output.run_output_path from the config."
+        ),
     )
     return parser
 
@@ -364,17 +367,14 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         plan = build_plan(config_path=args.config, local_root=args.local_root)
-        write_plan_path = (
-            require_write_plan_path(args.write_plan, plan)
-            if args.write_plan is not None
-            else None
-        )
+        write_plan_path = plan.run_output_path
+        if args.write_plan is not None:
+            write_plan_path = require_write_plan_path(args.write_plan, plan)
         materialize_local_inputs(plan)
     except (OSError, ValueError, tomllib.TOMLDecodeError) as exc:
         parser.error(str(exc))
 
-    if write_plan_path is not None:
-        write_plan(write_plan_path, plan)
+    write_plan(write_plan_path, plan)
     print(json.dumps(plan.to_mapping(), ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 

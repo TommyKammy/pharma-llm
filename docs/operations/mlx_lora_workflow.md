@@ -82,10 +82,11 @@ Any stale `valid.jsonl` or `test.jsonl` split files in the local MLX data
 directory are removed before writing the current `train.jsonl`. The planned
 command points at that local YAML config, so the validated settings and the
 eventual MLX invocation stay aligned. Training length is controlled by `iters`
-in this runner contract. If `--write-plan` is supplied, it must equal the
-configured `output.run_output_path` to keep the JSON plan location and planned
-artifact metadata consistent. Real MLX LoRA execution is intentionally deferred
-to P6-004 after this command contract is reviewed.
+in this runner contract. The JSON plan is written to the configured
+`output.run_output_path`; if `--write-plan` is supplied, it must equal that path
+and acts as an explicit assertion rather than an alternate output location.
+Real MLX LoRA execution is intentionally deferred to P6-004 after this command
+contract is reviewed.
 
 ## Initial Smoke Tests
 
