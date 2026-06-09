@@ -256,6 +256,8 @@ The prepared SFT JSONL shape for the training runner is:
 {"id":"...","dataset_type":"sft","prompt":"...","response":"...","provenance":{...}}
 ```
 
-The export rejects review candidates, duplicate ids, unapproved records,
-eval-only records, raw AI output, and other training-policy violations before
-writing the manifest.
+The export is all-or-nothing: it rejects review candidates, duplicate ids,
+unapproved records, eval-only records, raw AI output, skipped source records,
+and other training-policy violations before writing the manifest. It also runs
+the eval leakage guard against the configured Phase 4 eval set and removes the
+prepared JSONL and manifest if validation fails.

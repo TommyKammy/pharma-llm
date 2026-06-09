@@ -133,6 +133,73 @@ def test_export_sft_v0_1_rejects_policy_violations(
     assert not manifest_path.exists()
 
 
+def test_export_sft_v0_1_rejects_mixed_batch_with_skipped_records(tmp_path: Path) -> None:
+    unapproved = {
+        **sample_records()[2],
+        "id": "phase3_argilla_sample_003",
+        "provenance": {
+            **sample_records()[2]["provenance"],
+            "review_status": "unreviewed",
+        },
+    }
+    reviewed_path = write_jsonl(
+        tmp_path / "reviewed.jsonl",
+        [approved_records()[0], unapproved],
+    )
+    output_path = tmp_path / "sft_v0_1.jsonl"
+    manifest_path = tmp_path / "sft_v0_1.manifest.json"
+
+    with pytest.raises(ValueError, match="skipped source records are not allowed"):
+        export_sft_v0_1(
+            input_path=reviewed_path,
+            output_path=output_path,
+            manifest_path=manifest_path,
+            eval_path=SEED_PATH,
+        )
+
+    assert not output_path.exists()
+    assert not manifest_path.exists()
+
+
+def test_export_sft_v0_1_rejects_eval_leakage(tmp_path: Path) -> None:
+    leaked_record = {
+        **approved_records()[0],
+        "id": "eval_001",
+    }
+    reviewed_path = write_jsonl(tmp_path / "reviewed.jsonl", [leaked_record])
+    output_path = tmp_path / "sft_v0_1.jsonl"
+    manifest_path = tmp_path / "sft_v0_1.manifest.json"
+
+    with pytest.raises(ValueError, match="eval/training leakage detected"):
+        export_sft_v0_1(
+            input_path=reviewed_path,
+            output_path=output_path,
+            manifest_path=manifest_path,
+            eval_path=SEED_PATH,
+        )
+
+    assert not output_path.exists()
+    assert not manifest_path.exists()
+
+
+def test_export_sft_v0_1_removes_artifacts_when_manifest_fails(tmp_path: Path) -> None:
+    reviewed_path = write_jsonl(tmp_path / "reviewed.jsonl", approved_records())
+    output_path = tmp_path / "sft_v0_1.jsonl"
+    manifest_path = tmp_path / "sft_v0_1.manifest.json"
+    manifest_path.write_text("stale manifest\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="path is not a file"):
+        export_sft_v0_1(
+            input_path=reviewed_path,
+            output_path=output_path,
+            manifest_path=manifest_path,
+            eval_path=tmp_path / "missing_eval.jsonl",
+        )
+
+    assert not output_path.exists()
+    assert not manifest_path.exists()
+
+
 def test_export_sft_v0_1_rejects_duplicate_ids(tmp_path: Path) -> None:
     records = approved_records()
     reviewed_path = write_jsonl(tmp_path / "reviewed.jsonl", [records[0], records[0]])

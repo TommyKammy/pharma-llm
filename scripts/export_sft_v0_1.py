@@ -23,6 +23,7 @@ from scripts.promote_reviewed_dataset import (  # noqa: E402
     paths_collide,
     promote_reviewed_dataset,
 )
+from scripts.check_eval_leakage import check_eval_leakage  # noqa: E402
 from scripts.run_qwen_baseline import eval_id_fingerprint  # noqa: E402
 from scripts.run_baseline_eval import load_eval_records  # noqa: E402
 
@@ -167,6 +168,39 @@ def write_manifest(path: Path, manifest: SftExportManifest) -> None:
     )
 
 
+def remove_export_artifacts(*paths: Path) -> None:
+    for path in paths:
+        path.unlink(missing_ok=True)
+
+
+def promotion_failure_reason(result: PromotionResult) -> str:
+    failed_reasons = [entry.reason for entry in result.failed]
+    skipped_reasons = [entry.reason for entry in result.skipped]
+    return "; ".join(failed_reasons or skipped_reasons or ["no records promoted"])
+
+
+def require_complete_promotion(result: PromotionResult) -> None:
+    if not result.ok:
+        raise ValueError(f"SFT v0.1 export failed: {promotion_failure_reason(result)}")
+    if result.skipped:
+        raise ValueError(
+            "SFT v0.1 export failed: skipped source records are not allowed: "
+            + "; ".join(entry.reason for entry in result.skipped)
+        )
+
+
+def require_no_eval_leakage(*, eval_path: Path, output_path: Path) -> None:
+    findings = check_eval_leakage(
+        eval_paths=(eval_path,),
+        training_paths=(output_path,),
+    )
+    if findings:
+        raise ValueError(
+            "SFT v0.1 export failed: eval/training leakage detected: "
+            + "; ".join(finding.format() for finding in findings)
+        )
+
+
 def export_sft_v0_1(
     *,
     input_path: Path,
@@ -187,21 +221,21 @@ def export_sft_v0_1(
         output_path,
         dataset_type_value="sft",
     )
-    if not result.ok:
-        failed_reasons = [entry.reason for entry in result.failed]
-        skipped_reasons = [entry.reason for entry in result.skipped]
-        reason = "; ".join(failed_reasons or skipped_reasons or ["no records promoted"])
-        manifest_path.unlink(missing_ok=True)
-        raise ValueError(f"SFT v0.1 export failed: {reason}")
 
-    manifest = build_manifest(
-        input_path=input_path,
-        output_path=output_path,
-        eval_path=eval_path,
-        result=result,
-    )
-    write_manifest(manifest_path, manifest)
-    return manifest
+    try:
+        require_complete_promotion(result)
+        require_no_eval_leakage(eval_path=eval_path, output_path=output_path)
+        manifest = build_manifest(
+            input_path=input_path,
+            output_path=output_path,
+            eval_path=eval_path,
+            result=result,
+        )
+        write_manifest(manifest_path, manifest)
+        return manifest
+    except ValueError:
+        remove_export_artifacts(output_path, manifest_path)
+        raise
 
 
 def build_parser() -> argparse.ArgumentParser:
