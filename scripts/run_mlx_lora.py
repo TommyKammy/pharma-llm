@@ -27,8 +27,9 @@ class MlxLoraTrainingPlan:
     mlx_data_dir: Path
     mlx_config_path: Path
     rank: int
+    scale: int
+    dropout: float
     target_modules: tuple[str, ...]
-    epochs: int
     max_seq_length: int
     batch_size: int
     learning_rate: float
@@ -67,7 +68,9 @@ class MlxLoraTrainingPlan:
             "seed": self.seed,
             "lora_parameters": {
                 "rank": self.rank,
-                "target_modules": list(self.target_modules),
+                "scale": self.scale,
+                "dropout": self.dropout,
+                "keys": list(self.target_modules),
             },
         }
 
@@ -86,8 +89,9 @@ class MlxLoraTrainingPlan:
             "mlx_config": self.mlx_config_mapping(),
             "training": {
                 "rank": self.rank,
+                "scale": self.scale,
+                "dropout": self.dropout,
                 "target_modules": list(self.target_modules),
-                "epochs": self.epochs,
                 "max_seq_length": self.max_seq_length,
                 "batch_size": self.batch_size,
                 "learning_rate": self.learning_rate,
@@ -142,8 +146,15 @@ def require_positive_int(section: dict[str, Any], key: str, *, section_name: str
 
 def require_positive_float(section: dict[str, Any], key: str, *, section_name: str) -> float:
     value = section.get(key)
-    if not isinstance(value, int | float) or value <= 0:
+    if type(value) not in (int, float) or value <= 0:
         raise ValueError(f"{section_name}.{key} must be a positive number")
+    return float(value)
+
+
+def require_non_negative_float(section: dict[str, Any], key: str, *, section_name: str) -> float:
+    value = section.get(key)
+    if type(value) not in (int, float) or value < 0:
+        raise ValueError(f"{section_name}.{key} must be a non-negative number")
     return float(value)
 
 
@@ -236,8 +247,9 @@ def build_plan(
         mlx_data_dir=mlx_data_dir,
         mlx_config_path=mlx_config_path,
         rank=require_positive_int(training, "rank", section_name="training"),
+        scale=require_positive_int(training, "scale", section_name="training"),
+        dropout=require_non_negative_float(training, "dropout", section_name="training"),
         target_modules=require_target_modules(training),
-        epochs=require_positive_int(training, "epochs", section_name="training"),
         max_seq_length=require_positive_int(training, "max_seq_length", section_name="training"),
         batch_size=require_positive_int(training, "batch_size", section_name="training"),
         learning_rate=require_positive_float(training, "learning_rate", section_name="training"),
@@ -280,6 +292,8 @@ def dump_simple_yaml(mapping: dict[str, Any]) -> str:
 def materialize_local_inputs(plan: MlxLoraTrainingPlan) -> None:
     plan.mlx_data_dir.mkdir(parents=True, exist_ok=True)
     plan.mlx_config_path.parent.mkdir(parents=True, exist_ok=True)
+    for split_name in ("train.jsonl", "valid.jsonl", "test.jsonl"):
+        (plan.mlx_data_dir / split_name).unlink(missing_ok=True)
     if plan.dataset_path != plan.train_data_path:
         shutil.copyfile(plan.dataset_path, plan.train_data_path)
     plan.mlx_config_path.write_text(

@@ -43,8 +43,9 @@ mlx_config_path = "{local_root / "runs" / "phase6-test" / "mlx_lora_config.yaml"
 
 [training]
 rank = {rank}
+scale = 32
+dropout = 0.0
 target_modules = ["q_proj", "v_proj"]
-epochs = 1
 max_seq_length = 128
 batch_size = 1
 learning_rate = 0.00001
@@ -84,7 +85,9 @@ def test_build_plan_validates_config_and_planned_command(tmp_path: Path) -> None
     ).resolve()
     assert plan.mlx_config_mapping()["lora_parameters"] == {
         "rank": 16,
-        "target_modules": ["q_proj", "v_proj"],
+        "scale": 32,
+        "dropout": 0.0,
+        "keys": ["q_proj", "v_proj"],
     }
 
 
@@ -118,6 +121,22 @@ def test_build_plan_rejects_bool_integer_field(tmp_path: Path) -> None:
     config_path.write_text(text, encoding="utf-8")
 
     with pytest.raises(ValueError, match="training.iters must be a positive integer"):
+        build_plan(config_path=config_path, local_root=local_root)
+
+
+def test_build_plan_rejects_bool_float_field(tmp_path: Path) -> None:
+    local_root = tmp_path / "local"
+    dataset_path = tmp_path / "sft_v0_1.jsonl"
+    config_path = tmp_path / "lora.toml"
+    write_dataset(dataset_path)
+    write_config(config_path, dataset_path=dataset_path, local_root=local_root)
+    text = config_path.read_text(encoding="utf-8").replace(
+        "learning_rate = 0.00001",
+        "learning_rate = true",
+    )
+    config_path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="training.learning_rate must be a positive number"):
         build_plan(config_path=config_path, local_root=local_root)
 
 
@@ -162,6 +181,10 @@ def test_cli_dry_run_writes_plan(tmp_path: Path) -> None:
     plan_path = local_root / "runs" / "phase6-test" / "plan.json"
     write_dataset(dataset_path)
     write_config(config_path, dataset_path=dataset_path, local_root=local_root)
+    mlx_data_dir = local_root / "runs" / "phase6-test" / "mlx_data"
+    mlx_data_dir.mkdir(parents=True)
+    (mlx_data_dir / "valid.jsonl").write_text('{"prompt":"old","completion":"old"}\n')
+    (mlx_data_dir / "test.jsonl").write_text('{"prompt":"old","completion":"old"}\n')
 
     result = subprocess.run(
         [
@@ -187,12 +210,16 @@ def test_cli_dry_run_writes_plan(tmp_path: Path) -> None:
     assert stdout_plan["safety"]["executes_training"] is False
     assert stdout_plan["planned_command"][0] == "mlx_lm.lora"
     assert (local_root / "runs" / "phase6-test" / "mlx_data" / "train.jsonl").is_file()
+    assert not (local_root / "runs" / "phase6-test" / "mlx_data" / "valid.jsonl").exists()
+    assert not (local_root / "runs" / "phase6-test" / "mlx_data" / "test.jsonl").exists()
     assert (local_root / "runs" / "phase6-test" / "mlx_lora_config.yaml").is_file()
     yaml_text = (local_root / "runs" / "phase6-test" / "mlx_lora_config.yaml").read_text(
         encoding="utf-8"
     )
     assert "rank: 16" in yaml_text
-    assert "  target_modules:" in yaml_text
+    assert "  scale: 32" in yaml_text
+    assert "  dropout: 0.0" in yaml_text
+    assert "  keys:" in yaml_text
 
 
 def test_cli_rejects_write_plan_outside_local_root(tmp_path: Path) -> None:
