@@ -32,6 +32,29 @@ Keep model weights, adapters, checkpoints, and training logs outside Git:
 /Users/tsinfra/Dev/pharma-llm/local/runs
 ```
 
+## Phase 6 Training Dataset Input
+
+Use the approved-only SFT v0.1 export as the initial Qwen LoRA training input:
+
+```bash
+uv run python scripts/export_sft_v0_1.py \
+  /Users/tsinfra/Dev/pharma-llm/local/argilla/phase6_reviewed_sft.jsonl \
+  --output data/prepared/sft_v0_1.jsonl \
+  --manifest data/prepared/sft_v0_1.manifest.json
+```
+
+The runner-facing JSONL shape is deterministic and contains one SFT record per
+line. `response` preserves the project SFT schema, and `completion` mirrors it
+for the default MLX LM completions format:
+
+```json
+{"id":"...","dataset_type":"sft","prompt":"...","response":"...","completion":"...","provenance":{...}}
+```
+
+Use `data/prepared/sft_v0_1.manifest.json` to audit the dataset version,
+approved counts, output checksum, and Phase 4 eval-id fingerprint before
+starting a LoRA run.
+
 ## Initial Smoke Tests
 
 Phase 1 should start with a small model before any 27B-class experiment.
