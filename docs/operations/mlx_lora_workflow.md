@@ -85,6 +85,10 @@ eventual MLX invocation stay aligned. Training length is controlled by `iters`
 in this runner contract. The JSON plan is written to the configured
 `output.run_output_path`; if `--write-plan` is supplied, it must equal that path
 and acts as an explicit assertion rather than an alternate output location.
+The runner rejects path collisions across the JSON plan, generated YAML config,
+MLX split files, and adapter destination before materializing any local inputs.
+It also rejects unqualified LoRA target names; Phase 6 Qwen dry runs are limited
+to the reviewed `self_attn.*_proj` key allowlist.
 Real MLX LoRA execution is intentionally deferred to P6-004 after this command
 contract is reviewed.
 

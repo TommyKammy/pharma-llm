@@ -11,6 +11,15 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path("configs/mlx/qwen_sft_lora_r16.toml")
 DEFAULT_LOCAL_ROOT = Path("/Users/tsinfra/Dev/pharma-llm/local")
+MLX_SPLIT_NAMES = ("train.jsonl", "valid.jsonl", "test.jsonl")
+QWEN_TARGET_MODULE_KEYS = frozenset(
+    {
+        "self_attn.q_proj",
+        "self_attn.k_proj",
+        "self_attn.v_proj",
+        "self_attn.o_proj",
+    }
+)
 RUN_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,79}$")
 
 
@@ -175,6 +184,12 @@ def require_target_modules(section: dict[str, Any]) -> tuple[str, ...]:
     for item in value:
         if not isinstance(item, str) or not item.strip():
             raise ValueError("training.target_modules must be a non-empty string list")
+        if item not in QWEN_TARGET_MODULE_KEYS:
+            allowed = ", ".join(sorted(QWEN_TARGET_MODULE_KEYS))
+            raise ValueError(
+                "training.target_modules must use Phase 6 Qwen MLX module keys: "
+                + allowed
+            )
         modules.append(item)
     return tuple(modules)
 
@@ -190,6 +205,36 @@ def require_under_root(path: Path, root: Path, field_name: str) -> Path:
 def load_config(path: Path) -> dict[str, Any]:
     with path.open("rb") as handle:
         return tomllib.load(handle)
+
+
+def mlx_split_paths(mlx_data_dir: Path) -> tuple[Path, ...]:
+    return tuple(mlx_data_dir / split_name for split_name in MLX_SPLIT_NAMES)
+
+
+def require_artifact_paths_do_not_collide(
+    *,
+    adapter_path: Path,
+    run_output_path: Path,
+    mlx_config_path: Path,
+    mlx_data_dir: Path,
+) -> None:
+    split_paths = mlx_split_paths(mlx_data_dir)
+    generated_file_paths = {
+        "output.run_output_path": run_output_path,
+        "output.mlx_config_path": mlx_config_path,
+        **{f"mlx split {path.name}": path for path in split_paths},
+    }
+
+    seen: dict[Path, str] = {}
+    for label, path in generated_file_paths.items():
+        previous = seen.setdefault(path, label)
+        if previous != label:
+            raise ValueError(f"{label} must differ from {previous}")
+
+    if adapter_path in generated_file_paths.values():
+        raise ValueError("output.adapter_path must differ from generated MLX files")
+    if adapter_path == mlx_data_dir:
+        raise ValueError("output.adapter_path must differ from output.mlx_data_dir")
 
 
 def build_plan(
@@ -239,16 +284,17 @@ def build_plan(
         local_root,
         "output.mlx_config_path",
     )
-    train_data_path = mlx_data_dir / "train.jsonl"
 
     if not dataset_path.is_file():
         raise ValueError(f"data.dataset_path must exist and be a file: {dataset_path}")
     if require_model_exists and not model_path.exists():
         raise ValueError(f"model.path must exist before real execution: {model_path}")
-    if run_output_path == mlx_config_path:
-        raise ValueError("output.run_output_path must differ from output.mlx_config_path")
-    if run_output_path == train_data_path:
-        raise ValueError("output.run_output_path must differ from materialized train.jsonl")
+    require_artifact_paths_do_not_collide(
+        adapter_path=adapter_path,
+        run_output_path=run_output_path,
+        mlx_config_path=mlx_config_path,
+        mlx_data_dir=mlx_data_dir,
+    )
 
     return MlxLoraTrainingPlan(
         run_id=run_id,
@@ -308,8 +354,8 @@ def materialize_local_inputs(plan: MlxLoraTrainingPlan) -> None:
     train_data = plan.dataset_path.read_bytes()
     plan.mlx_data_dir.mkdir(parents=True, exist_ok=True)
     plan.mlx_config_path.parent.mkdir(parents=True, exist_ok=True)
-    for split_name in ("train.jsonl", "valid.jsonl", "test.jsonl"):
-        (plan.mlx_data_dir / split_name).unlink(missing_ok=True)
+    for split_path in mlx_split_paths(plan.mlx_data_dir):
+        split_path.unlink(missing_ok=True)
     plan.train_data_path.write_bytes(train_data)
     plan.mlx_config_path.write_text(
         dump_simple_yaml(plan.mlx_config_mapping()),

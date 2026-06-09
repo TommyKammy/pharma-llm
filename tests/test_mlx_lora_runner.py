@@ -19,11 +19,15 @@ def write_config(
     dataset_path: Path,
     local_root: Path,
     adapter_path: Path | None = None,
+    run_output_path: Path | None = None,
+    mlx_config_path: Path | None = None,
+    target_modules: str = '"self_attn.q_proj", "self_attn.v_proj"',
     run_id: str = "phase6-test-lora",
     rank: int = 16,
 ) -> None:
     adapter = adapter_path or local_root / "adapters" / "phase6-test"
-    run_output = local_root / "runs" / "phase6-test" / "run_plan.json"
+    run_output = run_output_path or local_root / "runs" / "phase6-test" / "run_plan.json"
+    mlx_config = mlx_config_path or local_root / "runs" / "phase6-test" / "mlx_lora_config.yaml"
     path.write_text(
         f"""
 [run]
@@ -39,14 +43,14 @@ dataset_path = "{dataset_path}"
 adapter_path = "{adapter}"
 run_output_path = "{run_output}"
 mlx_data_dir = "{local_root / "runs" / "phase6-test" / "mlx_data"}"
-mlx_config_path = "{local_root / "runs" / "phase6-test" / "mlx_lora_config.yaml"}"
+mlx_config_path = "{mlx_config}"
 
 [training]
 rank = {rank}
 scale = 32
 dropout = 0.0
 mask_prompt = true
-target_modules = ["self_attn.q_proj", "self_attn.v_proj"]
+target_modules = [{target_modules}]
 max_seq_length = 128
 batch_size = 1
 learning_rate = 0.00001
@@ -142,6 +146,22 @@ def test_build_plan_rejects_bool_float_field(tmp_path: Path) -> None:
         build_plan(config_path=config_path, local_root=local_root)
 
 
+def test_build_plan_rejects_unqualified_target_modules(tmp_path: Path) -> None:
+    local_root = tmp_path / "local"
+    dataset_path = tmp_path / "sft_v0_1.jsonl"
+    config_path = tmp_path / "lora.toml"
+    write_dataset(dataset_path)
+    write_config(
+        config_path,
+        dataset_path=dataset_path,
+        local_root=local_root,
+        target_modules='"q_proj"',
+    )
+
+    with pytest.raises(ValueError, match="Phase 6 Qwen MLX module keys"):
+        build_plan(config_path=config_path, local_root=local_root)
+
+
 def test_build_plan_rejects_tracked_adapter_destination(tmp_path: Path) -> None:
     local_root = tmp_path / "local"
     dataset_path = tmp_path / "sft_v0_1.jsonl"
@@ -155,6 +175,58 @@ def test_build_plan_rejects_tracked_adapter_destination(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError, match="output.adapter_path must be under local artifact root"):
+        build_plan(config_path=config_path, local_root=local_root)
+
+
+def test_build_plan_rejects_run_output_split_collision(tmp_path: Path) -> None:
+    local_root = tmp_path / "local"
+    dataset_path = tmp_path / "sft_v0_1.jsonl"
+    mlx_data_dir = local_root / "runs" / "phase6-test" / "mlx_data"
+    config_path = tmp_path / "lora.toml"
+    write_dataset(dataset_path)
+    write_config(
+        config_path,
+        dataset_path=dataset_path,
+        local_root=local_root,
+        run_output_path=mlx_data_dir / "valid.jsonl",
+    )
+
+    with pytest.raises(ValueError, match="mlx split valid.jsonl must differ"):
+        build_plan(config_path=config_path, local_root=local_root)
+
+
+def test_build_plan_rejects_mlx_config_split_collision(tmp_path: Path) -> None:
+    local_root = tmp_path / "local"
+    dataset_path = tmp_path / "sft_v0_1.jsonl"
+    mlx_data_dir = local_root / "runs" / "phase6-test" / "mlx_data"
+    config_path = tmp_path / "lora.toml"
+    write_dataset(dataset_path)
+    write_config(
+        config_path,
+        dataset_path=dataset_path,
+        local_root=local_root,
+        mlx_config_path=mlx_data_dir / "train.jsonl",
+    )
+
+    with pytest.raises(ValueError, match="mlx split train.jsonl must differ"):
+        build_plan(config_path=config_path, local_root=local_root)
+
+
+def test_build_plan_rejects_adapter_generated_file_collision(tmp_path: Path) -> None:
+    local_root = tmp_path / "local"
+    dataset_path = tmp_path / "sft_v0_1.jsonl"
+    mlx_config_path = local_root / "runs" / "phase6-test" / "mlx_lora_config.yaml"
+    config_path = tmp_path / "lora.toml"
+    write_dataset(dataset_path)
+    write_config(
+        config_path,
+        dataset_path=dataset_path,
+        local_root=local_root,
+        adapter_path=mlx_config_path,
+        mlx_config_path=mlx_config_path,
+    )
+
+    with pytest.raises(ValueError, match="output.adapter_path must differ from generated MLX files"):
         build_plan(config_path=config_path, local_root=local_root)
 
 
