@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import shutil
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -290,12 +289,12 @@ def dump_simple_yaml(mapping: dict[str, Any]) -> str:
 
 
 def materialize_local_inputs(plan: MlxLoraTrainingPlan) -> None:
+    train_data = plan.dataset_path.read_bytes()
     plan.mlx_data_dir.mkdir(parents=True, exist_ok=True)
     plan.mlx_config_path.parent.mkdir(parents=True, exist_ok=True)
     for split_name in ("train.jsonl", "valid.jsonl", "test.jsonl"):
         (plan.mlx_data_dir / split_name).unlink(missing_ok=True)
-    if plan.dataset_path != plan.train_data_path:
-        shutil.copyfile(plan.dataset_path, plan.train_data_path)
+    plan.train_data_path.write_bytes(train_data)
     plan.mlx_config_path.write_text(
         dump_simple_yaml(plan.mlx_config_mapping()),
         encoding="utf-8",

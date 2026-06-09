@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.run_mlx_lora import build_plan
+from scripts.run_mlx_lora import build_plan, materialize_local_inputs
 
 
 def write_dataset(path: Path) -> None:
@@ -249,3 +249,19 @@ def test_cli_rejects_write_plan_outside_local_root(tmp_path: Path) -> None:
     assert result.returncode == 2
     assert "--write-plan must be under local artifact root" in result.stderr
     assert not (local_root / "runs" / "phase6-test" / "mlx_data").exists()
+
+
+def test_materialize_keeps_dataset_when_source_is_train_split(tmp_path: Path) -> None:
+    local_root = tmp_path / "local"
+    mlx_data_dir = local_root / "runs" / "phase6-test" / "mlx_data"
+    dataset_path = mlx_data_dir / "train.jsonl"
+    config_path = tmp_path / "lora.toml"
+    write_dataset(dataset_path)
+    write_config(config_path, dataset_path=dataset_path, local_root=local_root)
+    (mlx_data_dir / "valid.jsonl").write_text('{"prompt":"old","completion":"old"}\n')
+
+    plan = build_plan(config_path=config_path, local_root=local_root)
+    materialize_local_inputs(plan)
+
+    assert dataset_path.read_text(encoding="utf-8") == '{"prompt":"p","completion":"c"}\n'
+    assert not (mlx_data_dir / "valid.jsonl").exists()
