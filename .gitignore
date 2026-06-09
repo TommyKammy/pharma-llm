@@ -66,6 +66,7 @@ results/**
 !results/README.md
 !results/reports/
 !results/reports/index.md
+!results/reports/*.md
 
 # Logs
 logs/
