@@ -191,7 +191,7 @@ def test_build_plan_rejects_run_output_split_collision(tmp_path: Path) -> None:
         run_output_path=mlx_data_dir / "valid.jsonl",
     )
 
-    with pytest.raises(ValueError, match="mlx split valid.jsonl must differ"):
+    with pytest.raises(ValueError, match="output.run_output_path must differ from MLX split files"):
         build_plan(config_path=config_path, local_root=local_root)
 
 
@@ -208,7 +208,7 @@ def test_build_plan_rejects_mlx_config_split_collision(tmp_path: Path) -> None:
         mlx_config_path=mlx_data_dir / "train.jsonl",
     )
 
-    with pytest.raises(ValueError, match="mlx split train.jsonl must differ"):
+    with pytest.raises(ValueError, match="output.mlx_config_path must differ from MLX split files"):
         build_plan(config_path=config_path, local_root=local_root)
 
 

@@ -176,7 +176,7 @@ def require_bool(section: dict[str, Any], key: str, *, section_name: str) -> boo
     return value
 
 
-def require_target_modules(section: dict[str, Any]) -> tuple[str, ...]:
+def require_qwen_target_modules(section: dict[str, Any]) -> tuple[str, ...]:
     value = section.get("target_modules")
     if not isinstance(value, list) or not value:
         raise ValueError("training.target_modules must be a non-empty string list")
@@ -187,7 +187,7 @@ def require_target_modules(section: dict[str, Any]) -> tuple[str, ...]:
         if item not in QWEN_TARGET_MODULE_KEYS:
             allowed = ", ".join(sorted(QWEN_TARGET_MODULE_KEYS))
             raise ValueError(
-                "training.target_modules must use Phase 6 Qwen MLX module keys: "
+                "training.target_modules must use qualified Phase 6 Qwen MLX module keys: "
                 + allowed
             )
         modules.append(item)
@@ -219,6 +219,13 @@ def require_artifact_paths_do_not_collide(
     mlx_data_dir: Path,
 ) -> None:
     split_paths = mlx_split_paths(mlx_data_dir)
+    if mlx_config_path in split_paths:
+        raise ValueError("output.mlx_config_path must differ from MLX split files")
+    if run_output_path in split_paths:
+        raise ValueError("output.run_output_path must differ from MLX split files")
+    if adapter_path in split_paths:
+        raise ValueError("output.adapter_path must differ from MLX split files")
+
     generated_file_paths = {
         "output.run_output_path": run_output_path,
         "output.mlx_config_path": mlx_config_path,
@@ -310,7 +317,7 @@ def build_plan(
         scale=require_positive_int(training, "scale", section_name="training"),
         dropout=require_non_negative_float(training, "dropout", section_name="training"),
         mask_prompt=require_bool(training, "mask_prompt", section_name="training"),
-        target_modules=require_target_modules(training),
+        target_modules=require_qwen_target_modules(training),
         max_seq_length=require_positive_int(training, "max_seq_length", section_name="training"),
         batch_size=require_positive_int(training, "batch_size", section_name="training"),
         learning_rate=require_positive_float(training, "learning_rate", section_name="training"),
