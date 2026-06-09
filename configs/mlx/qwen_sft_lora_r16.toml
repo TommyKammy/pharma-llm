@@ -1,0 +1,35 @@
+[run]
+run_id = "phase6-qwen-sft-lora-r16-v1"
+
+[model]
+path = "/Users/tsinfra/Dev/pharma-llm/local/models/qwen3.6-27b-base"
+
+[data]
+dataset_path = "data/prepared/sft_v0_1.jsonl"
+
+[output]
+adapter_path = "/Users/tsinfra/Dev/pharma-llm/local/adapters/qwen_sft_lora_r16_v1"
+run_output_path = "/Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/run_plan.json"
+mlx_data_dir = "/Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/mlx_data"
+mlx_config_path = "/Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/mlx_lora_config.yaml"
+
+[training]
+rank = 16
+scale = 32
+dropout = 0.0
+mask_prompt = true
+target_modules = [
+  "self_attn.q_proj",
+  "self_attn.k_proj",
+  "self_attn.v_proj",
+  "self_attn.o_proj",
+]
+max_seq_length = 2048
+batch_size = 1
+learning_rate = 0.00001
+iters = 200
+num_layers = 32
+seed = 42
+steps_per_report = 10
+steps_per_eval = 50
+save_every = 50
