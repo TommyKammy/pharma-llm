@@ -24,6 +24,9 @@ def write_config(
     target_modules: str = '"self_attn.q_proj", "self_attn.v_proj"',
     run_id: str = "phase6-test-lora",
     rank: int = 16,
+    scale: str = "32",
+    num_layers: int = 2,
+    seed: int = 7,
 ) -> None:
     adapter = adapter_path or local_root / "adapters" / "phase6-test"
     run_output = run_output_path or local_root / "runs" / "phase6-test" / "run_plan.json"
@@ -47,7 +50,7 @@ mlx_config_path = "{mlx_config}"
 
 [training]
 rank = {rank}
-scale = 32
+scale = {scale}
 dropout = 0.0
 mask_prompt = true
 target_modules = [{target_modules}]
@@ -55,8 +58,8 @@ max_seq_length = 128
 batch_size = 1
 learning_rate = 0.00001
 iters = 2
-num_layers = 2
-seed = 7
+num_layers = {num_layers}
+seed = {seed}
 steps_per_report = 1
 steps_per_eval = 1
 save_every = 1
@@ -90,7 +93,7 @@ def test_build_plan_validates_config_and_planned_command(tmp_path: Path) -> None
     ).resolve()
     assert plan.mlx_config_mapping()["lora_parameters"] == {
         "rank": 16,
-        "scale": 32,
+        "scale": 32.0,
         "dropout": 0.0,
         "keys": ["self_attn.q_proj", "self_attn.v_proj"],
     }
@@ -144,6 +147,27 @@ def test_build_plan_rejects_bool_float_field(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="training.learning_rate must be a positive number"):
         build_plan(config_path=config_path, local_root=local_root)
+
+
+def test_build_plan_accepts_mlx_numeric_sentinels(tmp_path: Path) -> None:
+    local_root = tmp_path / "local"
+    dataset_path = tmp_path / "sft_v0_1.jsonl"
+    config_path = tmp_path / "lora.toml"
+    write_dataset(dataset_path)
+    write_config(
+        config_path,
+        dataset_path=dataset_path,
+        local_root=local_root,
+        scale="20.0",
+        num_layers=-1,
+        seed=0,
+    )
+
+    plan = build_plan(config_path=config_path, local_root=local_root)
+
+    assert plan.scale == 20.0
+    assert plan.num_layers == -1
+    assert plan.seed == 0
 
 
 def test_build_plan_rejects_unqualified_target_modules(tmp_path: Path) -> None:
@@ -209,6 +233,33 @@ def test_build_plan_rejects_mlx_config_split_collision(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError, match="output.mlx_config_path must differ from MLX split files"):
+        build_plan(config_path=config_path, local_root=local_root)
+
+
+def test_build_plan_rejects_generated_file_equal_to_data_dir(tmp_path: Path) -> None:
+    local_root = tmp_path / "local"
+    dataset_path = tmp_path / "sft_v0_1.jsonl"
+    mlx_data_dir = local_root / "runs" / "phase6-test" / "mlx_data"
+    config_path = tmp_path / "lora.toml"
+    write_dataset(dataset_path)
+    write_config(
+        config_path,
+        dataset_path=dataset_path,
+        local_root=local_root,
+        run_output_path=mlx_data_dir,
+    )
+
+    with pytest.raises(ValueError, match="output.run_output_path must differ"):
+        build_plan(config_path=config_path, local_root=local_root)
+
+    write_config(
+        config_path,
+        dataset_path=dataset_path,
+        local_root=local_root,
+        mlx_config_path=mlx_data_dir,
+    )
+
+    with pytest.raises(ValueError, match="output.mlx_config_path must differ"):
         build_plan(config_path=config_path, local_root=local_root)
 
 
@@ -293,7 +344,7 @@ def test_cli_dry_run_writes_plan(tmp_path: Path) -> None:
     )
     assert "rank: 16" in yaml_text
     assert "mask_prompt: true" in yaml_text
-    assert "  scale: 32" in yaml_text
+    assert "  scale: 32.0" in yaml_text
     assert "  dropout: 0.0" in yaml_text
     assert "  keys:" in yaml_text
     assert '    - "self_attn.q_proj"' in yaml_text

@@ -155,6 +155,19 @@ def require_positive_int(section: dict[str, Any], key: str, *, section_name: str
     return value
 
 
+def require_int_at_least(
+    section: dict[str, Any],
+    key: str,
+    *,
+    minimum: int,
+    section_name: str,
+) -> int:
+    value = section.get(key)
+    if type(value) is not int or value < minimum:
+        raise ValueError(f"{section_name}.{key} must be an integer >= {minimum}")
+    return value
+
+
 def require_positive_float(section: dict[str, Any], key: str, *, section_name: str) -> float:
     value = section.get(key)
     if type(value) not in (int, float) or value <= 0:
@@ -221,6 +234,10 @@ def require_artifact_paths_do_not_collide(
     mlx_data_dir: Path,
 ) -> None:
     split_paths = mlx_split_paths(mlx_data_dir)
+    if run_output_path == mlx_data_dir:
+        raise ValueError("output.run_output_path must differ from output.mlx_data_dir")
+    if mlx_config_path == mlx_data_dir:
+        raise ValueError("output.mlx_config_path must differ from output.mlx_data_dir")
     if mlx_config_path in split_paths:
         raise ValueError("output.mlx_config_path must differ from MLX split files")
     if run_output_path in split_paths:
@@ -316,7 +333,7 @@ def build_plan(
         mlx_data_dir=mlx_data_dir,
         mlx_config_path=mlx_config_path,
         rank=require_positive_int(training, "rank", section_name="training"),
-        scale=require_positive_int(training, "scale", section_name="training"),
+        scale=require_positive_float(training, "scale", section_name="training"),
         dropout=require_non_negative_float(training, "dropout", section_name="training"),
         mask_prompt=require_bool(training, "mask_prompt", section_name="training"),
         target_modules=require_qwen_target_modules(training),
@@ -324,8 +341,13 @@ def build_plan(
         batch_size=require_positive_int(training, "batch_size", section_name="training"),
         learning_rate=require_positive_float(training, "learning_rate", section_name="training"),
         iters=require_positive_int(training, "iters", section_name="training"),
-        num_layers=require_positive_int(training, "num_layers", section_name="training"),
-        seed=require_positive_int(training, "seed", section_name="training"),
+        num_layers=require_int_at_least(
+            training,
+            "num_layers",
+            minimum=-1,
+            section_name="training",
+        ),
+        seed=require_int_at_least(training, "seed", minimum=0, section_name="training"),
         steps_per_report=require_positive_int(training, "steps_per_report", section_name="training"),
         steps_per_eval=require_positive_int(training, "steps_per_eval", section_name="training"),
         save_every=require_positive_int(training, "save_every", section_name="training"),

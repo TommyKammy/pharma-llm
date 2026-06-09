@@ -89,6 +89,8 @@ The runner rejects path collisions across the JSON plan, generated YAML config,
 MLX split files, and adapter destination before materializing any local inputs.
 It also rejects unqualified LoRA target names; Phase 6 Qwen dry runs are limited
 to the reviewed `self_attn.*_proj` key allowlist.
+MLX-compatible numeric settings are preserved, including fractional
+`lora_parameters.scale`, `num_layers = -1` for all layers, and `seed = 0`.
 Real MLX LoRA execution is intentionally deferred to P6-004 after this command
 contract is reviewed.
 
