@@ -28,6 +28,7 @@ class MlxLoraTrainingPlan:
     rank: int
     scale: int
     dropout: float
+    mask_prompt: bool
     target_modules: tuple[str, ...]
     max_seq_length: int
     batch_size: int
@@ -54,6 +55,7 @@ class MlxLoraTrainingPlan:
         return {
             "model": str(self.model_path),
             "train": True,
+            "mask_prompt": self.mask_prompt,
             "data": str(self.mlx_data_dir),
             "adapter_path": str(self.adapter_path),
             "iters": self.iters,
@@ -90,6 +92,7 @@ class MlxLoraTrainingPlan:
                 "rank": self.rank,
                 "scale": self.scale,
                 "dropout": self.dropout,
+                "mask_prompt": self.mask_prompt,
                 "target_modules": list(self.target_modules),
                 "max_seq_length": self.max_seq_length,
                 "batch_size": self.batch_size,
@@ -155,6 +158,13 @@ def require_non_negative_float(section: dict[str, Any], key: str, *, section_nam
     if type(value) not in (int, float) or value < 0:
         raise ValueError(f"{section_name}.{key} must be a non-negative number")
     return float(value)
+
+
+def require_bool(section: dict[str, Any], key: str, *, section_name: str) -> bool:
+    value = section.get(key)
+    if type(value) is not bool:
+        raise ValueError(f"{section_name}.{key} must be a boolean")
+    return value
 
 
 def require_target_modules(section: dict[str, Any]) -> tuple[str, ...]:
@@ -229,11 +239,16 @@ def build_plan(
         local_root,
         "output.mlx_config_path",
     )
+    train_data_path = mlx_data_dir / "train.jsonl"
 
     if not dataset_path.is_file():
         raise ValueError(f"data.dataset_path must exist and be a file: {dataset_path}")
     if require_model_exists and not model_path.exists():
         raise ValueError(f"model.path must exist before real execution: {model_path}")
+    if run_output_path == mlx_config_path:
+        raise ValueError("output.run_output_path must differ from output.mlx_config_path")
+    if run_output_path == train_data_path:
+        raise ValueError("output.run_output_path must differ from materialized train.jsonl")
 
     return MlxLoraTrainingPlan(
         run_id=run_id,
@@ -248,6 +263,7 @@ def build_plan(
         rank=require_positive_int(training, "rank", section_name="training"),
         scale=require_positive_int(training, "scale", section_name="training"),
         dropout=require_non_negative_float(training, "dropout", section_name="training"),
+        mask_prompt=require_bool(training, "mask_prompt", section_name="training"),
         target_modules=require_target_modules(training),
         max_seq_length=require_positive_int(training, "max_seq_length", section_name="training"),
         batch_size=require_positive_int(training, "batch_size", section_name="training"),
@@ -309,6 +325,17 @@ def write_plan(path: Path, plan: MlxLoraTrainingPlan) -> None:
     )
 
 
+def require_write_plan_path(path: Path, plan: MlxLoraTrainingPlan) -> Path:
+    resolved_path = require_under_root(path, plan.local_root, "--write-plan")
+    if resolved_path != plan.run_output_path:
+        raise ValueError(f"--write-plan must equal output.run_output_path: {plan.run_output_path}")
+    if resolved_path == plan.mlx_config_path:
+        raise ValueError("--write-plan must not collide with output.mlx_config_path")
+    if resolved_path == plan.train_data_path:
+        raise ValueError("--write-plan must not collide with materialized train.jsonl")
+    return resolved_path
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Validate and render a dry-run MLX LoRA training plan."
@@ -338,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         plan = build_plan(config_path=args.config, local_root=args.local_root)
         write_plan_path = (
-            require_under_root(args.write_plan, plan.local_root, "--write-plan")
+            require_write_plan_path(args.write_plan, plan)
             if args.write_plan is not None
             else None
         )

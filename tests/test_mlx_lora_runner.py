@@ -45,7 +45,8 @@ mlx_config_path = "{local_root / "runs" / "phase6-test" / "mlx_lora_config.yaml"
 rank = {rank}
 scale = 32
 dropout = 0.0
-target_modules = ["q_proj", "v_proj"]
+mask_prompt = true
+target_modules = ["self_attn.q_proj", "self_attn.v_proj"]
 max_seq_length = 128
 batch_size = 1
 learning_rate = 0.00001
@@ -72,7 +73,7 @@ def test_build_plan_validates_config_and_planned_command(tmp_path: Path) -> None
 
     assert plan.run_id == "phase6-test-lora"
     assert plan.rank == 16
-    assert plan.target_modules == ("q_proj", "v_proj")
+    assert plan.target_modules == ("self_attn.q_proj", "self_attn.v_proj")
     assert plan.adapter_path == (local_root / "adapters" / "phase6-test").resolve()
     command = plan.command()
     assert command == [
@@ -87,8 +88,9 @@ def test_build_plan_validates_config_and_planned_command(tmp_path: Path) -> None
         "rank": 16,
         "scale": 32,
         "dropout": 0.0,
-        "keys": ["q_proj", "v_proj"],
+        "keys": ["self_attn.q_proj", "self_attn.v_proj"],
     }
+    assert plan.mlx_config_mapping()["mask_prompt"] is True
 
 
 def test_build_plan_rejects_missing_dataset(tmp_path: Path) -> None:
@@ -178,7 +180,7 @@ def test_cli_dry_run_writes_plan(tmp_path: Path) -> None:
     local_root = tmp_path / "local"
     dataset_path = tmp_path / "sft_v0_1.jsonl"
     config_path = tmp_path / "lora.toml"
-    plan_path = local_root / "runs" / "phase6-test" / "plan.json"
+    plan_path = local_root / "runs" / "phase6-test" / "run_plan.json"
     write_dataset(dataset_path)
     write_config(config_path, dataset_path=dataset_path, local_root=local_root)
     mlx_data_dir = local_root / "runs" / "phase6-test" / "mlx_data"
@@ -217,9 +219,40 @@ def test_cli_dry_run_writes_plan(tmp_path: Path) -> None:
         encoding="utf-8"
     )
     assert "rank: 16" in yaml_text
+    assert "mask_prompt: true" in yaml_text
     assert "  scale: 32" in yaml_text
     assert "  dropout: 0.0" in yaml_text
     assert "  keys:" in yaml_text
+    assert '    - "self_attn.q_proj"' in yaml_text
+
+
+def test_cli_rejects_write_plan_that_differs_from_configured_run_output(tmp_path: Path) -> None:
+    local_root = tmp_path / "local"
+    dataset_path = tmp_path / "sft_v0_1.jsonl"
+    config_path = tmp_path / "lora.toml"
+    write_dataset(dataset_path)
+    write_config(config_path, dataset_path=dataset_path, local_root=local_root)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/run_mlx_lora.py",
+            "--config",
+            str(config_path),
+            "--local-root",
+            str(local_root),
+            "--dry-run",
+            "--write-plan",
+            str(local_root / "runs" / "phase6-test" / "other_plan.json"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "--write-plan must equal output.run_output_path" in result.stderr
+    assert not (local_root / "runs" / "phase6-test" / "mlx_data").exists()
 
 
 def test_cli_rejects_write_plan_outside_local_root(tmp_path: Path) -> None:
