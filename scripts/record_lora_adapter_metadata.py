@@ -97,6 +97,13 @@ def require_plan_mapping(plan: dict[str, Any], key: str) -> dict[str, Any]:
     return value
 
 
+def require_plan_string(mapping: dict[str, Any], key: str, field_name: str) -> str:
+    value = mapping.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"run plan missing string: {field_name}")
+    return value
+
+
 def require_plan_local_root(plan: dict[str, Any], local_root: Path) -> Path:
     plan_local_root = require_plan_path(plan, "local_root")
     supplied_local_root = local_root.expanduser().resolve()
@@ -160,6 +167,105 @@ def require_generated_config_matches_plan(plan: dict[str, Any]) -> None:
         )
 
 
+def require_mlx_config_path_matches_plan(
+    *,
+    plan: dict[str, Any],
+    mlx_config: dict[str, Any],
+    plan_key: str,
+    config_key: str,
+) -> Path:
+    expected_path = require_plan_path(plan, plan_key)
+    actual_path = Path(
+        require_plan_string(mlx_config, config_key, f"mlx_config.{config_key}")
+    ).expanduser().resolve()
+    if actual_path != expected_path:
+        raise ValueError(f"run plan {plan_key} must match mlx_config.{config_key}")
+    return actual_path
+
+
+def require_plan_field_matches_mlx_config(
+    *,
+    plan_training: dict[str, Any],
+    mlx_config: dict[str, Any],
+    training_key: str,
+    config_key: str,
+) -> None:
+    if plan_training.get(training_key) != mlx_config.get(config_key):
+        raise ValueError(f"run plan training.{training_key} must match mlx_config.{config_key}")
+
+
+def require_lora_parameter_matches_training(
+    *,
+    plan_training: dict[str, Any],
+    lora_parameters: dict[str, Any],
+    training_key: str,
+    parameter_key: str,
+) -> None:
+    if plan_training.get(training_key) != lora_parameters.get(parameter_key):
+        raise ValueError(
+            f"run plan training.{training_key} must match mlx_config.lora_parameters.{parameter_key}"
+        )
+
+
+def require_plan_matches_mlx_config(plan: dict[str, Any]) -> None:
+    mlx_config = require_plan_mapping(plan, "mlx_config")
+    plan_training = require_plan_training(plan)
+    require_mlx_config_path_matches_plan(
+        plan=plan,
+        mlx_config=mlx_config,
+        plan_key="model_path",
+        config_key="model",
+    )
+    mlx_data_dir = require_mlx_config_path_matches_plan(
+        plan=plan,
+        mlx_config=mlx_config,
+        plan_key="mlx_data_dir",
+        config_key="data",
+    )
+    require_mlx_config_path_matches_plan(
+        plan=plan,
+        mlx_config=mlx_config,
+        plan_key="adapter_path",
+        config_key="adapter_path",
+    )
+    if require_plan_path(plan, "train_data_path") != mlx_data_dir / "train.jsonl":
+        raise ValueError("run plan train_data_path must match mlx_config.data/train.jsonl")
+
+    for training_key in (
+        "mask_prompt",
+        "iters",
+        "batch_size",
+        "num_layers",
+        "max_seq_length",
+        "learning_rate",
+        "steps_per_report",
+        "steps_per_eval",
+        "save_every",
+        "seed",
+    ):
+        require_plan_field_matches_mlx_config(
+            plan_training=plan_training,
+            mlx_config=mlx_config,
+            training_key=training_key,
+            config_key=training_key,
+        )
+
+    lora_parameters = require_plan_mapping(mlx_config, "lora_parameters")
+    for training_key, parameter_key in (
+        ("rank", "rank"),
+        ("scale", "scale"),
+        ("dropout", "dropout"),
+    ):
+        require_lora_parameter_matches_training(
+            plan_training=plan_training,
+            lora_parameters=lora_parameters,
+            training_key=training_key,
+            parameter_key=parameter_key,
+        )
+    if plan_training.get("target_modules") != lora_parameters.get("keys"):
+        raise ValueError("run plan training.target_modules must match mlx_config.lora_parameters.keys")
+
+
 def require_source_config_matches_plan(plan: dict[str, Any]) -> None:
     source_config_path = require_plan_path(plan, "config_path")
     expected_digest = require_plan_digest(plan, "config_sha256")
@@ -180,6 +286,16 @@ def require_source_dataset_matches_plan(plan: dict[str, Any]) -> None:
         )
 
 
+def require_materialized_training_input_matches_plan(plan: dict[str, Any]) -> None:
+    training_input_path = require_plan_path(plan, "train_data_path")
+    expected_digest = require_plan_digest(plan, "dataset_sha256")
+    actual_digest = file_sha256(training_input_path)
+    if actual_digest != expected_digest:
+        raise ValueError(
+            "materialized training input must match run plan dataset_sha256; rerun dry-run before recording metadata"
+        )
+
+
 def build_metadata(
     *,
     run_plan_path: Path,
@@ -197,8 +313,10 @@ def build_metadata(
     training = require_plan_training(plan)
     local_root_path = require_plan_local_root(plan, local_root)
     require_generated_config_matches_plan(plan)
+    require_plan_matches_mlx_config(plan)
     require_source_config_matches_plan(plan)
     require_source_dataset_matches_plan(plan)
+    require_materialized_training_input_matches_plan(plan)
     resolved_metadata_output = require_metadata_output_does_not_collide(
         plan=plan,
         run_plan_path=resolved_run_plan_path,

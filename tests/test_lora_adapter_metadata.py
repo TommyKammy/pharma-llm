@@ -388,6 +388,29 @@ def test_build_metadata_rejects_source_dataset_drift(tmp_path: Path) -> None:
         )
 
 
+def test_build_metadata_rejects_materialized_training_input_drift(tmp_path: Path) -> None:
+    run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
+    adapter_path.mkdir(parents=True)
+    (adapter_path / "adapter_config.json").write_text("{}\n", encoding="utf-8")
+    (adapter_path / "adapters.safetensors").write_text("weights\n", encoding="utf-8")
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    plan = json.loads(run_plan_path.read_text(encoding="utf-8"))
+    Path(plan["train_data_path"]).write_text('{"prompt":"stale","completion":"stale"}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="materialized training input must match"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="executed",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at="2026-06-10T01:00:00Z",
+            ended_at="2026-06-10T03:00:00Z",
+            status_note="Local training completed.",
+        )
+
+
 def test_build_metadata_rejects_source_config_drift(tmp_path: Path) -> None:
     run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
     metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
@@ -405,6 +428,36 @@ def test_build_metadata_rejects_source_config_drift(tmp_path: Path) -> None:
             started_at=None,
             ended_at=None,
             status_note="Operator checklist prepared; training not executed in CI.",
+        )
+
+
+def test_build_metadata_rejects_plan_adapter_path_mismatch_with_mlx_config(
+    tmp_path: Path,
+) -> None:
+    run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
+    adapter_path.mkdir(parents=True)
+    (adapter_path / "adapter_config.json").write_text("{}\n", encoding="utf-8")
+    (adapter_path / "adapters.safetensors").write_text("weights\n", encoding="utf-8")
+    mismatched_adapter_path = local_root / "adapters" / "mismatched"
+    mismatched_adapter_path.mkdir(parents=True)
+    (mismatched_adapter_path / "adapter_config.json").write_text("{}\n", encoding="utf-8")
+    (mismatched_adapter_path / "adapters.safetensors").write_text("weights\n", encoding="utf-8")
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    plan = json.loads(run_plan_path.read_text(encoding="utf-8"))
+    plan["adapter_path"] = str(mismatched_adapter_path)
+    run_plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="adapter_path must match mlx_config.adapter_path"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="executed",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at="2026-06-10T01:00:00Z",
+            ended_at="2026-06-10T03:00:00Z",
+            status_note="Local training completed.",
         )
 
 
@@ -841,6 +894,38 @@ def test_validate_adapter_metadata_rejects_invalid_recorded_hyperparameters(
     metadata["training"][field_name] = value
 
     with pytest.raises(AdapterMetadataValidationError, match=message):
+        validate_adapter_metadata(metadata)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("scale", float("nan")),
+        ("dropout", float("inf")),
+        ("learning_rate", float("-inf")),
+    ],
+)
+def test_validate_adapter_metadata_rejects_nonfinite_hyperparameters(
+    tmp_path: Path,
+    field_name: str,
+    value: float,
+) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="planned",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at=None,
+        ended_at=None,
+        status_note="Operator checklist prepared; training not executed in CI.",
+    )
+    metadata["training"][field_name] = value
+
+    with pytest.raises(AdapterMetadataValidationError, match=f"training.{field_name} must be finite"):
         validate_adapter_metadata(metadata)
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -72,6 +73,8 @@ def require_bool(value: Any, field_name: str) -> bool:
 def require_number(value: Any, field_name: str) -> int | float:
     if type(value) not in (int, float):
         raise AdapterMetadataValidationError(f"{field_name} must be a number")
+    if type(value) is float and not math.isfinite(value):
+        raise AdapterMetadataValidationError(f"{field_name} must be finite")
     return value
 
 

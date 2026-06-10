@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import tomllib
 from dataclasses import dataclass
@@ -38,7 +39,7 @@ class MlxLoraTrainingPlan:
     mlx_data_dir: Path
     mlx_config_path: Path
     rank: int
-    scale: int
+    scale: float
     dropout: float
     mask_prompt: bool
     target_modules: tuple[str, ...]
@@ -175,15 +176,15 @@ def require_int_at_least(
 
 def require_positive_float(section: dict[str, Any], key: str, *, section_name: str) -> float:
     value = section.get(key)
-    if type(value) not in (int, float) or value <= 0:
-        raise ValueError(f"{section_name}.{key} must be a positive number")
+    if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{section_name}.{key} must be a finite positive number")
     return float(value)
 
 
 def require_non_negative_float(section: dict[str, Any], key: str, *, section_name: str) -> float:
     value = section.get(key)
-    if type(value) not in (int, float) or value < 0:
-        raise ValueError(f"{section_name}.{key} must be a non-negative number")
+    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+        raise ValueError(f"{section_name}.{key} must be a finite non-negative number")
     return float(value)
 
 
