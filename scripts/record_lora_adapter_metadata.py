@@ -73,6 +73,7 @@ def require_metadata_output_does_not_collide(
     resolved_output = metadata_output.expanduser().resolve()
     reserved_paths = {
         "run plan": run_plan_path.expanduser().resolve(),
+        "output.adapter_path": require_plan_path(plan, "adapter_path"),
         "output.run_output_path": require_plan_path(plan, "run_output_path"),
         "output.mlx_config_path": require_plan_path(plan, "mlx_config_path"),
         **{f"MLX split {path.name}": path for path in mlx_split_paths(plan)},

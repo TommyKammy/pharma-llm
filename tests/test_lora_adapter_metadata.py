@@ -185,6 +185,23 @@ def test_build_metadata_rejects_output_collision_with_run_plan(tmp_path: Path) -
         )
 
 
+def test_build_metadata_rejects_output_collision_with_adapter_path(tmp_path: Path) -> None:
+    run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
+
+    with pytest.raises(ValueError, match="metadata output must differ from output.adapter_path"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=adapter_path,
+            status="planned",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at=None,
+            ended_at=None,
+            status_note="Operator checklist prepared; training not executed in CI.",
+        )
+
+
 def test_validate_adapter_metadata_resolves_local_root_escape(tmp_path: Path) -> None:
     run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
     metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
@@ -365,6 +382,46 @@ def test_validate_adapter_metadata_rejects_fractional_rank(tmp_path: Path) -> No
     metadata["training"]["rank"] = 1.5
 
     with pytest.raises(AdapterMetadataValidationError, match="training.rank must be an integer"):
+        validate_adapter_metadata(metadata)
+
+
+def test_validate_adapter_metadata_rejects_fractional_training_count(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="planned",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at=None,
+        ended_at=None,
+        status_note="Operator checklist prepared; training not executed in CI.",
+    )
+    metadata["training"]["iters"] = 1.5
+
+    with pytest.raises(AdapterMetadataValidationError, match="training.iters must be an integer"):
+        validate_adapter_metadata(metadata)
+
+
+def test_validate_adapter_metadata_rejects_nonpositive_training_count(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="planned",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at=None,
+        ended_at=None,
+        status_note="Operator checklist prepared; training not executed in CI.",
+    )
+    metadata["training"]["max_seq_length"] = 0
+
+    with pytest.raises(AdapterMetadataValidationError, match="training.max_seq_length must be positive"):
         validate_adapter_metadata(metadata)
 
 

@@ -60,6 +60,14 @@ def require_number(value: Any, field_name: str) -> int | float:
     return value
 
 
+def require_positive_int(value: Any, field_name: str) -> int:
+    if type(value) is not int:
+        raise AdapterMetadataValidationError(f"{field_name} must be an integer")
+    if value < 1:
+        raise AdapterMetadataValidationError(f"{field_name} must be positive")
+    return value
+
+
 def require_string_list(value: Any, field_name: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not value:
         raise AdapterMetadataValidationError(f"{field_name} must be a non-empty string list")
@@ -168,16 +176,12 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
             )
 
     training = require_mapping(payload["training"], "training")
-    rank = training.get("rank")
-    if type(rank) is not int:
-        raise AdapterMetadataValidationError("training.rank must be an integer")
-    if rank < 1:
-        raise AdapterMetadataValidationError("training.rank must be positive")
+    require_positive_int(training.get("rank"), "training.rank")
     require_number(training.get("scale"), "training.scale")
     require_number(training.get("dropout"), "training.dropout")
     require_string_list(training.get("target_modules"), "training.target_modules")
-    require_number(training.get("max_seq_length"), "training.max_seq_length")
-    require_number(training.get("iters"), "training.iters")
+    require_positive_int(training.get("max_seq_length"), "training.max_seq_length")
+    require_positive_int(training.get("iters"), "training.iters")
     if "epochs" not in training:
         raise AdapterMetadataValidationError("training.epochs must be present")
     if training["epochs"] is not None and type(training["epochs"]) is not int:
