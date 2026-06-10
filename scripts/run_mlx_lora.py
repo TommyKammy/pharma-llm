@@ -29,6 +29,7 @@ class MlxLoraTrainingPlan:
     run_id: str
     config_path: Path
     config_sha256: str
+    dataset_sha256: str
     local_root: Path
     model_path: Path
     dataset_path: Path
@@ -91,6 +92,7 @@ class MlxLoraTrainingPlan:
             "run_id": self.run_id,
             "config_path": str(self.config_path),
             "config_sha256": self.config_sha256,
+            "dataset_sha256": self.dataset_sha256,
             "local_root": str(self.local_root),
             "model_path": str(self.model_path),
             "dataset_path": str(self.dataset_path),
@@ -337,6 +339,7 @@ def build_plan(
         run_id=run_id,
         config_path=resolved_config,
         config_sha256=file_sha256(resolved_config),
+        dataset_sha256=file_sha256(dataset_path),
         local_root=local_root.expanduser().resolve(),
         model_path=model_path,
         dataset_path=dataset_path,

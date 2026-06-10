@@ -98,6 +98,7 @@ def test_build_metadata_records_planned_placeholder(tmp_path: Path) -> None:
     assert validated["training"]["num_layers"] == -1
     assert validated["training"]["seed"] == 0
     assert validated["dataset"]["training_input"]["path"].endswith("mlx_data/train.jsonl")
+    assert validated["dataset"]["sha256"] == validated["dataset"]["training_input"]["sha256"]
 
 
 def test_build_metadata_records_executed_adapter(tmp_path: Path) -> None:
@@ -223,6 +224,40 @@ def test_validate_adapter_metadata_rejects_relative_local_root(
         validate_adapter_metadata(metadata)
 
 
+@pytest.mark.parametrize(
+    ("section_name", "field_name", "message"),
+    [
+        ("dataset", "path", "dataset.path must be an absolute path"),
+        ("config", "source_path", "config.source_path must be an absolute path"),
+    ],
+)
+def test_validate_adapter_metadata_rejects_relative_source_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    section_name: str,
+    field_name: str,
+    message: str,
+) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="planned",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at=None,
+        ended_at=None,
+        status_note="Operator checklist prepared; training not executed in CI.",
+    )
+    monkeypatch.chdir(tmp_path)
+    metadata[section_name][field_name] = "relative/source-path"
+
+    with pytest.raises(AdapterMetadataValidationError, match=message):
+        validate_adapter_metadata(metadata)
+
+
 def test_build_metadata_rejects_output_outside_local_root(tmp_path: Path) -> None:
     run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
 
@@ -333,27 +368,24 @@ def test_validate_adapter_metadata_resolves_local_root_escape(tmp_path: Path) ->
         validate_adapter_metadata(metadata)
 
 
-def test_build_metadata_hashes_materialized_training_input(tmp_path: Path) -> None:
+def test_build_metadata_rejects_source_dataset_drift(tmp_path: Path) -> None:
     run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
     metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
     plan = json.loads(run_plan_path.read_text(encoding="utf-8"))
     Path(plan["dataset_path"]).write_text('{"prompt":"new","completion":"new"}\n', encoding="utf-8")
 
-    metadata = build_metadata(
-        run_plan_path=run_plan_path,
-        metadata_output=metadata_path,
-        status="planned",
-        dataset_version="sft-v0.1",
-        model_id="qwen/qwen3.6-27b-base",
-        local_root=local_root,
-        started_at=None,
-        ended_at=None,
-        status_note="Operator checklist prepared; training not executed in CI.",
-    )
-
-    assert metadata["dataset"]["path"] == plan["dataset_path"]
-    assert metadata["dataset"]["training_input"]["path"] == plan["train_data_path"]
-    assert metadata["dataset"]["sha256"] != metadata["dataset"]["training_input"]["sha256"]
+    with pytest.raises(ValueError, match="source dataset must match run plan dataset_sha256"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="planned",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at=None,
+            ended_at=None,
+            status_note="Operator checklist prepared; training not executed in CI.",
+        )
 
 
 def test_build_metadata_rejects_source_config_drift(tmp_path: Path) -> None:
@@ -554,6 +586,24 @@ def test_build_metadata_rejects_bad_failed_timestamps(tmp_path: Path) -> None:
             started_at="bad",
             ended_at=None,
             status_note="Local training failed before adapter creation.",
+        )
+
+
+def test_build_metadata_rejects_planned_execution_timestamps(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+
+    with pytest.raises(AdapterMetadataValidationError, match="planned metadata must not include"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="planned",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at="2026-06-10T01:00:00Z",
+            ended_at=None,
+            status_note="Operator checklist prepared; training not executed in CI.",
         )
 
 
@@ -867,7 +917,7 @@ def test_metadata_cli_writes_expanded_output_path(tmp_path: Path) -> None:
             sys.executable,
             "scripts/record_lora_adapter_metadata.py",
             "--run-plan",
-            str(plan.run_output_path),
+            "~/pharma-llm/local/runs/phase6-test/run_plan.json",
             "--output",
             metadata_path,
             "--local-root",

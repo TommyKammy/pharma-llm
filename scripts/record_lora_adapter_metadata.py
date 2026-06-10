@@ -170,6 +170,16 @@ def require_source_config_matches_plan(plan: dict[str, Any]) -> None:
         )
 
 
+def require_source_dataset_matches_plan(plan: dict[str, Any]) -> None:
+    source_dataset_path = require_plan_path(plan, "dataset_path")
+    expected_digest = require_plan_digest(plan, "dataset_sha256")
+    actual_digest = file_sha256(source_dataset_path)
+    if actual_digest != expected_digest:
+        raise ValueError(
+            "source dataset must match run plan dataset_sha256; rerun dry-run before recording metadata"
+        )
+
+
 def build_metadata(
     *,
     run_plan_path: Path,
@@ -182,14 +192,16 @@ def build_metadata(
     ended_at: str | None,
     status_note: str,
 ) -> dict[str, Any]:
-    plan = load_json(run_plan_path)
+    resolved_run_plan_path = run_plan_path.expanduser().resolve()
+    plan = load_json(resolved_run_plan_path)
     training = require_plan_training(plan)
     local_root_path = require_plan_local_root(plan, local_root)
     require_generated_config_matches_plan(plan)
     require_source_config_matches_plan(plan)
+    require_source_dataset_matches_plan(plan)
     resolved_metadata_output = require_metadata_output_does_not_collide(
         plan=plan,
-        run_plan_path=run_plan_path,
+        run_plan_path=resolved_run_plan_path,
         metadata_output=metadata_output,
     )
     dataset_path = require_plan_path(plan, "dataset_path")

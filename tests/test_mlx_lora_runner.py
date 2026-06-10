@@ -81,6 +81,7 @@ def test_build_plan_validates_config_and_planned_command(tmp_path: Path) -> None
     assert plan.run_id == "phase6-test-lora"
     assert plan.rank == 16
     assert len(plan.to_mapping()["config_sha256"]) == 64
+    assert len(plan.to_mapping()["dataset_sha256"]) == 64
     assert plan.target_modules == ("self_attn.q_proj", "self_attn.v_proj")
     assert plan.adapter_path == (local_root / "adapters" / "phase6-test").resolve()
     command = plan.command()

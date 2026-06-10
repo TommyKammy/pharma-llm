@@ -141,6 +141,14 @@ def require_local_artifact_path(value: Any, field_name: str, local_root: str) ->
     return str(path)
 
 
+def require_absolute_path(value: Any, field_name: str) -> str:
+    raw_path = require_non_empty_string(value, field_name)
+    expanded_path = Path(raw_path).expanduser()
+    if not expanded_path.is_absolute():
+        raise AdapterMetadataValidationError(f"{field_name} must be an absolute path")
+    return str(expanded_path.resolve())
+
+
 def require_absolute_local_root(value: Any, field_name: str) -> str:
     raw_path = require_non_empty_string(value, field_name)
     expanded_path = Path(raw_path).expanduser()
@@ -201,7 +209,7 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
 
     dataset = require_mapping(payload["dataset"], "dataset")
     require_non_empty_string(dataset.get("version"), "dataset.version")
-    require_non_empty_string(dataset.get("path"), "dataset.path")
+    require_absolute_path(dataset.get("path"), "dataset.path")
     require_sha256(dataset.get("sha256"), "dataset.sha256")
     training_input = require_mapping(dataset.get("training_input"), "dataset.training_input")
     require_local_artifact_path(
@@ -212,7 +220,7 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
     require_sha256(training_input.get("sha256"), "dataset.training_input.sha256")
 
     config = require_mapping(payload["config"], "config")
-    require_non_empty_string(config.get("source_path"), "config.source_path")
+    require_absolute_path(config.get("source_path"), "config.source_path")
     require_sha256(config.get("source_sha256"), "config.source_sha256")
     require_local_artifact_path(config.get("generated_path"), "config.generated_path", local_root)
     require_sha256(config.get("generated_sha256"), "config.generated_sha256")
@@ -269,6 +277,10 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
         ended_at = parse_utc_timestamp(timestamps.get("ended_at"), "timestamps.ended_at")
     if started_at is not None and ended_at is not None and ended_at < started_at:
         raise AdapterMetadataValidationError("timestamps.ended_at must be at or after started_at")
+    if status == "planned" and (started_at is not None or ended_at is not None):
+        raise AdapterMetadataValidationError(
+            "planned metadata must not include execution timestamps"
+        )
     if status == "executed":
         require_utc_timestamp(timestamps.get("started_at"), "timestamps.started_at")
         require_utc_timestamp(timestamps.get("ended_at"), "timestamps.ended_at")
