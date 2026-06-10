@@ -110,7 +110,7 @@ def build_metadata(
     model_path = require_plan_path(plan, "model_path")
     local_root_path = local_root.expanduser().resolve()
 
-    placeholder = status != "executed"
+    placeholder = status == "planned"
     adapter_exists = adapter_path.exists()
     adapter_is_directory = adapter_path.is_dir()
     adapter_markers = sorted(path.name for path in adapter_path.iterdir()) if adapter_is_directory else []
@@ -222,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
             ended_at=args.ended_at,
             status_note=args.status_note,
         )
-        write_metadata(args.output, metadata)
+        write_metadata(Path(metadata["adapter"]["metadata_path"]), metadata)
     except (OSError, ValueError, AdapterMetadataValidationError) as exc:
         parser.error(str(exc))
     print(json.dumps(metadata, ensure_ascii=False, indent=2, sort_keys=True))

@@ -82,16 +82,21 @@ def require_local_artifact_path(value: Any, field_name: str, local_root: str) ->
     return str(path)
 
 
-def require_utc_timestamp(value: Any, field_name: str) -> str:
+def parse_utc_timestamp(value: Any, field_name: str) -> datetime:
     raw_value = require_non_empty_string(value, field_name)
     if not raw_value.endswith("Z"):
         raise AdapterMetadataValidationError(f"{field_name} must be an ISO-8601 UTC timestamp")
     try:
-        datetime.fromisoformat(raw_value.removesuffix("Z") + "+00:00")
+        return datetime.fromisoformat(raw_value.removesuffix("Z") + "+00:00")
     except ValueError as exc:
         raise AdapterMetadataValidationError(
             f"{field_name} must be an ISO-8601 UTC timestamp"
         ) from exc
+
+
+def require_utc_timestamp(value: Any, field_name: str) -> str:
+    raw_value = require_non_empty_string(value, field_name)
+    parse_utc_timestamp(raw_value, field_name)
     return raw_value
 
 
@@ -163,7 +168,9 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
             )
 
     training = require_mapping(payload["training"], "training")
-    rank = require_number(training.get("rank"), "training.rank")
+    rank = training.get("rank")
+    if type(rank) is not int:
+        raise AdapterMetadataValidationError("training.rank must be an integer")
     if rank < 1:
         raise AdapterMetadataValidationError("training.rank must be positive")
     require_number(training.get("scale"), "training.scale")
@@ -178,10 +185,14 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
 
     timestamps = require_mapping(payload["timestamps"], "timestamps")
     require_utc_timestamp(timestamps.get("created_at"), "timestamps.created_at")
+    started_at = None
+    ended_at = None
     if timestamps.get("started_at") is not None:
-        require_utc_timestamp(timestamps.get("started_at"), "timestamps.started_at")
+        started_at = parse_utc_timestamp(timestamps.get("started_at"), "timestamps.started_at")
     if timestamps.get("ended_at") is not None:
-        require_utc_timestamp(timestamps.get("ended_at"), "timestamps.ended_at")
+        ended_at = parse_utc_timestamp(timestamps.get("ended_at"), "timestamps.ended_at")
+    if started_at is not None and ended_at is not None and ended_at < started_at:
+        raise AdapterMetadataValidationError("timestamps.ended_at must be at or after started_at")
     if status == "executed":
         require_utc_timestamp(timestamps.get("started_at"), "timestamps.started_at")
         require_utc_timestamp(timestamps.get("ended_at"), "timestamps.ended_at")

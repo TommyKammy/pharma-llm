@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -308,6 +309,65 @@ def test_build_metadata_rejects_bad_failed_timestamps(tmp_path: Path) -> None:
         )
 
 
+def test_build_metadata_rejects_reversed_executed_timestamps(tmp_path: Path) -> None:
+    run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
+    adapter_path.mkdir(parents=True)
+    (adapter_path / "adapters.safetensors").write_text("weights\n", encoding="utf-8")
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+
+    with pytest.raises(AdapterMetadataValidationError, match="ended_at must be at or after"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="executed",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at="2026-06-10T03:00:00Z",
+            ended_at="2026-06-10T01:00:00Z",
+            status_note="Local training completed.",
+        )
+
+
+def test_build_metadata_marks_failed_runs_as_attempted(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="failed",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at="2026-06-10T01:00:00Z",
+        ended_at="2026-06-10T01:30:00Z",
+        status_note="Local training failed before adapter creation.",
+    )
+
+    assert metadata["validation"]["is_dry_run_placeholder"] is False
+
+
+def test_validate_adapter_metadata_rejects_fractional_rank(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="planned",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at=None,
+        ended_at=None,
+        status_note="Operator checklist prepared; training not executed in CI.",
+    )
+    metadata["training"]["rank"] = 1.5
+
+    with pytest.raises(AdapterMetadataValidationError, match="training.rank must be an integer"):
+        validate_adapter_metadata(metadata)
+
+
 def test_metadata_cli_writes_local_json(tmp_path: Path) -> None:
     run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
     metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
@@ -335,3 +395,43 @@ def test_metadata_cli_writes_local_json(tmp_path: Path) -> None:
     file_payload = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert stdout_payload == file_payload
     assert file_payload["status"] == "planned"
+
+
+def test_metadata_cli_writes_expanded_output_path(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    local_root = home / "pharma-llm" / "local"
+    dataset_path = tmp_path / "sft_v0_1.jsonl"
+    config_path = tmp_path / "qwen_sft_lora_r16.toml"
+    write_dataset(dataset_path)
+    write_config(config_path, dataset_path=dataset_path, local_root=local_root)
+    plan = build_plan(config_path=config_path, local_root=local_root)
+    materialize_local_inputs(plan)
+    write_plan(plan.run_output_path, plan)
+    metadata_path = "~/pharma-llm/local/runs/phase6-test/adapter_metadata.json"
+    env = {**os.environ, "HOME": str(home)}
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/record_lora_adapter_metadata.py",
+            "--run-plan",
+            str(plan.run_output_path),
+            "--output",
+            metadata_path,
+            "--local-root",
+            "~/pharma-llm/local",
+            "--status-note",
+            "Operator checklist prepared; training not executed in CI.",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    expected_path = home / "pharma-llm" / "local" / "runs" / "phase6-test" / "adapter_metadata.json"
+    assert result.returncode == 0
+    assert expected_path.exists()
+    assert not (Path.cwd() / "~").exists()
+    file_payload = json.loads(expected_path.read_text(encoding="utf-8"))
+    assert file_payload["adapter"]["metadata_path"] == str(expected_path)
