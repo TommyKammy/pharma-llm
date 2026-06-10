@@ -173,6 +173,30 @@ def test_validate_adapter_metadata_rejects_failed_placeholder(tmp_path: Path) ->
         validate_adapter_metadata(metadata)
 
 
+@pytest.mark.parametrize("field_name", ["is_directory", "marker_files"])
+def test_validate_adapter_metadata_requires_adapter_marker_fields_for_all_statuses(
+    tmp_path: Path,
+    field_name: str,
+) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="planned",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at=None,
+        ended_at=None,
+        status_note="Operator checklist prepared; training not executed in CI.",
+    )
+    metadata["adapter"].pop(field_name)
+
+    with pytest.raises(AdapterMetadataValidationError, match=f"adapter.{field_name} must be"):
+        validate_adapter_metadata(metadata)
+
+
 def test_validate_adapter_metadata_rejects_relative_artifact_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -696,6 +720,24 @@ def test_build_metadata_rejects_bad_failed_timestamps(tmp_path: Path) -> None:
         )
 
 
+def test_build_metadata_rejects_missing_failed_timestamps(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+
+    with pytest.raises(AdapterMetadataValidationError, match="failed metadata must include"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="failed",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at=None,
+            ended_at=None,
+            status_note="Local training failed before adapter creation.",
+        )
+
+
 def test_build_metadata_rejects_planned_execution_timestamps(tmp_path: Path) -> None:
     run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
     metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
@@ -830,6 +872,26 @@ def test_validate_adapter_metadata_rejects_nonpositive_training_count(tmp_path: 
     metadata["training"]["max_seq_length"] = 0
 
     with pytest.raises(AdapterMetadataValidationError, match="training.max_seq_length must be positive"):
+        validate_adapter_metadata(metadata)
+
+
+def test_validate_adapter_metadata_rejects_negative_epochs(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="planned",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at=None,
+        ended_at=None,
+        status_note="Operator checklist prepared; training not executed in CI.",
+    )
+    metadata["training"]["epochs"] = -1
+
+    with pytest.raises(AdapterMetadataValidationError, match="training.epochs must be >= 0"):
         validate_adapter_metadata(metadata)
 
 

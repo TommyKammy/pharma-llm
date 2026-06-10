@@ -108,13 +108,20 @@ def require_non_negative_number(value: Any, field_name: str) -> int | float:
     return parsed
 
 
-def require_string_list(value: Any, field_name: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or not value:
-        raise AdapterMetadataValidationError(f"{field_name} must be a non-empty string list")
+def require_string_list(
+    value: Any,
+    field_name: str,
+    *,
+    allow_empty: bool = False,
+) -> tuple[str, ...]:
+    if not isinstance(value, list) or (not allow_empty and not value):
+        list_type = "string list" if allow_empty else "non-empty string list"
+        raise AdapterMetadataValidationError(f"{field_name} must be a {list_type}")
     parsed: list[str] = []
     for item in value:
         if not isinstance(item, str) or not item.strip():
-            raise AdapterMetadataValidationError(f"{field_name} must be a non-empty string list")
+            list_type = "string list" if allow_empty else "non-empty string list"
+            raise AdapterMetadataValidationError(f"{field_name} must be a {list_type}")
         parsed.append(item)
     return tuple(parsed)
 
@@ -232,6 +239,12 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
     require_local_artifact_path(adapter.get("path"), "adapter.path", local_root)
     require_local_artifact_path(adapter.get("metadata_path"), "adapter.metadata_path", local_root)
     adapter_exists = require_bool(adapter.get("exists"), "adapter.exists")
+    adapter_is_directory = require_bool(adapter.get("is_directory"), "adapter.is_directory")
+    markers = require_string_list(
+        adapter.get("marker_files"),
+        "adapter.marker_files",
+        allow_empty=True,
+    )
     if status == "planned" and adapter_exists:
         raise AdapterMetadataValidationError(
             "planned metadata must not point to an existing adapter"
@@ -239,10 +252,8 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
     if status == "executed":
         if not adapter_exists:
             raise AdapterMetadataValidationError("adapter.exists must be true for executed metadata")
-        require_bool(adapter.get("is_directory"), "adapter.is_directory")
-        if not adapter["is_directory"]:
+        if not adapter_is_directory:
             raise AdapterMetadataValidationError("adapter.is_directory must be true for executed metadata")
-        markers = require_string_list(adapter.get("marker_files"), "adapter.marker_files")
         if "adapter_config.json" not in markers:
             raise AdapterMetadataValidationError(
                 "executed adapter metadata must include adapter_config.json"
@@ -269,6 +280,8 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
         raise AdapterMetadataValidationError("training.epochs must be present")
     if training["epochs"] is not None and type(training["epochs"]) is not int:
         raise AdapterMetadataValidationError("training.epochs must be null or an integer")
+    if training["epochs"] is not None and training["epochs"] < 0:
+        raise AdapterMetadataValidationError("training.epochs must be >= 0")
 
     timestamps = require_mapping(payload["timestamps"], "timestamps")
     require_utc_timestamp(timestamps.get("created_at"), "timestamps.created_at")
@@ -284,7 +297,11 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
         raise AdapterMetadataValidationError(
             "planned metadata must not include execution timestamps"
         )
-    if status == "executed":
+    if status in {"executed", "failed"}:
+        if timestamps.get("started_at") is None or timestamps.get("ended_at") is None:
+            raise AdapterMetadataValidationError(
+                f"{status} metadata must include execution timestamps"
+            )
         require_utc_timestamp(timestamps.get("started_at"), "timestamps.started_at")
         require_utc_timestamp(timestamps.get("ended_at"), "timestamps.ended_at")
 
