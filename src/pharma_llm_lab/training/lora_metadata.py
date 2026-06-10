@@ -208,7 +208,7 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
     model = require_mapping(payload["model"], "model")
     require_non_empty_string(model.get("id"), "model.id")
     require_non_empty_string(model.get("provider"), "model.provider")
-    require_non_empty_string(model.get("path"), "model.path")
+    require_absolute_path(model.get("path"), "model.path")
 
     dataset = require_mapping(payload["dataset"], "dataset")
     require_non_empty_string(dataset.get("version"), "dataset.version")

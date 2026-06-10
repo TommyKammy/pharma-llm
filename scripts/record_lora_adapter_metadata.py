@@ -20,7 +20,7 @@ from pharma_llm_lab.training.lora_metadata import (  # noqa: E402
     AdapterMetadataValidationError,
     validate_adapter_metadata,
 )
-from scripts.run_mlx_lora import dump_simple_yaml  # noqa: E402
+from scripts.run_mlx_lora import build_plan, dump_simple_yaml  # noqa: E402
 
 DEFAULT_LOCAL_ROOT = Path("/Users/tsinfra/Dev/pharma-llm/local")
 DEFAULT_MODEL_ID = "qwen/qwen3.6-27b-base"
@@ -45,6 +45,23 @@ MLX_CONFIG_FIELD_ORDER = (
     "lora_parameters",
 )
 LORA_PARAMETER_FIELD_ORDER = ("rank", "scale", "dropout", "keys")
+SOURCE_CONFIG_PLAN_FIELDS = (
+    "run_id",
+    "config_path",
+    "config_sha256",
+    "dataset_sha256",
+    "local_root",
+    "model_path",
+    "dataset_path",
+    "adapter_path",
+    "run_output_path",
+    "mlx_data_dir",
+    "train_data_path",
+    "mlx_config_path",
+    "training",
+    "mlx_config",
+    "planned_command",
+)
 
 
 def file_sha256(path: Path) -> str:
@@ -210,6 +227,8 @@ def require_lora_parameter_matches_training(
 def require_plan_matches_mlx_config(plan: dict[str, Any]) -> None:
     mlx_config = require_plan_mapping(plan, "mlx_config")
     plan_training = require_plan_training(plan)
+    if mlx_config.get("train") is not True:
+        raise ValueError("mlx_config.train must be true")
     require_mlx_config_path_matches_plan(
         plan=plan,
         mlx_config=mlx_config,
@@ -296,6 +315,17 @@ def require_materialized_training_input_matches_plan(plan: dict[str, Any]) -> No
         )
 
 
+def require_plan_matches_source_config(plan: dict[str, Any], local_root: Path) -> None:
+    source_config_path = require_plan_path(plan, "config_path")
+    expected_plan = build_plan(config_path=source_config_path, local_root=local_root).to_mapping()
+    for field_name in SOURCE_CONFIG_PLAN_FIELDS:
+        if plan.get(field_name) != expected_plan.get(field_name):
+            raise ValueError(
+                f"run plan {field_name} must match source config dry-run output; "
+                "rerun dry-run before recording metadata"
+            )
+
+
 def build_metadata(
     *,
     run_plan_path: Path,
@@ -317,6 +347,7 @@ def build_metadata(
     require_source_config_matches_plan(plan)
     require_source_dataset_matches_plan(plan)
     require_materialized_training_input_matches_plan(plan)
+    require_plan_matches_source_config(plan, local_root_path)
     resolved_metadata_output = require_metadata_output_does_not_collide(
         plan=plan,
         run_plan_path=resolved_run_plan_path,

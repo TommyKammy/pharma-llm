@@ -227,6 +227,7 @@ def test_validate_adapter_metadata_rejects_relative_local_root(
 @pytest.mark.parametrize(
     ("section_name", "field_name", "message"),
     [
+        ("model", "path", "model.path must be an absolute path"),
         ("dataset", "path", "dataset.path must be an absolute path"),
         ("config", "source_path", "config.source_path must be an absolute path"),
     ],
@@ -486,6 +487,59 @@ def test_build_metadata_rejects_generated_config_drift(tmp_path: Path) -> None:
     Path(plan["mlx_config_path"]).write_text("rank: 999\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="generated MLX config must match run plan"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="planned",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at=None,
+            ended_at=None,
+            status_note="Operator checklist prepared; training not executed in CI.",
+        )
+
+
+def test_build_metadata_rejects_disabled_mlx_training_flag(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    plan = json.loads(run_plan_path.read_text(encoding="utf-8"))
+    plan["mlx_config"]["train"] = False
+    run_plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    mlx_config_path = Path(plan["mlx_config_path"])
+    mlx_config_path.write_text(
+        mlx_config_path.read_text(encoding="utf-8").replace("train: true\n", "train: false\n"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="mlx_config.train must be true"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="planned",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at=None,
+            ended_at=None,
+            status_note="Operator checklist prepared; training not executed in CI.",
+        )
+
+
+def test_build_metadata_rejects_plan_drift_from_source_config(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    plan = json.loads(run_plan_path.read_text(encoding="utf-8"))
+    plan["training"]["rank"] = 32
+    plan["mlx_config"]["lora_parameters"]["rank"] = 32
+    run_plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    mlx_config_path = Path(plan["mlx_config_path"])
+    mlx_config_path.write_text(
+        mlx_config_path.read_text(encoding="utf-8").replace("  rank: 16\n", "  rank: 32\n"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="run plan training must match source config dry-run output"):
         build_metadata(
             run_plan_path=run_plan_path,
             metadata_output=metadata_path,
