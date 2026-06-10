@@ -95,6 +95,7 @@ def test_build_metadata_records_planned_placeholder(tmp_path: Path) -> None:
     assert validated["training"]["epochs"] is None
     assert validated["training"]["num_layers"] == -1
     assert validated["training"]["seed"] == 0
+    assert validated["dataset"]["training_input"]["path"].endswith("mlx_data/train.jsonl")
 
 
 def test_build_metadata_records_executed_adapter(tmp_path: Path) -> None:
@@ -119,12 +120,15 @@ def test_build_metadata_records_executed_adapter(tmp_path: Path) -> None:
     assert validated["status"] == "executed"
     assert validated["validation"]["is_dry_run_placeholder"] is False
     assert validated["adapter"]["exists"] is True
+    assert validated["adapter"]["is_directory"] is True
+    assert "adapter_config.json" in validated["adapter"]["marker_files"]
     assert validated["timestamps"]["started_at"] == "2026-06-10T01:00:00Z"
 
 
 def test_validate_adapter_metadata_rejects_executed_placeholder(tmp_path: Path) -> None:
     run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
     adapter_path.mkdir(parents=True)
+    (adapter_path / "adapter_config.json").write_text("{}\n", encoding="utf-8")
     metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
     metadata = build_metadata(
         run_plan_path=run_plan_path,
@@ -158,6 +162,91 @@ def test_build_metadata_rejects_output_outside_local_root(tmp_path: Path) -> Non
             ended_at=None,
             status_note="Operator checklist prepared; training not executed in CI.",
         )
+
+
+def test_validate_adapter_metadata_resolves_local_root_escape(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="planned",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at=None,
+        ended_at=None,
+        status_note="Operator checklist prepared; training not executed in CI.",
+    )
+    metadata["adapter"]["metadata_path"] = str(local_root / ".." / "escaped_metadata.json")
+
+    with pytest.raises(AdapterMetadataValidationError, match="adapter.metadata_path must be under"):
+        validate_adapter_metadata(metadata)
+
+
+def test_build_metadata_hashes_materialized_training_input(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    plan = json.loads(run_plan_path.read_text(encoding="utf-8"))
+    Path(plan["dataset_path"]).write_text('{"prompt":"new","completion":"new"}\n', encoding="utf-8")
+
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="planned",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at=None,
+        ended_at=None,
+        status_note="Operator checklist prepared; training not executed in CI.",
+    )
+
+    assert metadata["dataset"]["path"] == plan["dataset_path"]
+    assert metadata["dataset"]["training_input"]["path"] == plan["train_data_path"]
+    assert metadata["dataset"]["sha256"] != metadata["dataset"]["training_input"]["sha256"]
+
+
+def test_build_metadata_rejects_executed_adapter_file(tmp_path: Path) -> None:
+    run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
+    adapter_path.parent.mkdir(parents=True)
+    adapter_path.write_text("not a directory\n", encoding="utf-8")
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+
+    with pytest.raises(AdapterMetadataValidationError, match="adapter.is_directory must be true"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="executed",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at="2026-06-10T01:00:00Z",
+            ended_at="2026-06-10T03:00:00Z",
+            status_note="Local training completed.",
+        )
+
+
+def test_validate_adapter_metadata_rejects_bad_executed_timestamps(tmp_path: Path) -> None:
+    run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
+    adapter_path.mkdir(parents=True)
+    (adapter_path / "adapter_config.json").write_text("{}\n", encoding="utf-8")
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="executed",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at="2026-06-10T01:00:00Z",
+        ended_at="2026-06-10T03:00:00Z",
+        status_note="Local training completed.",
+    )
+    metadata["timestamps"]["started_at"] = "bad"
+
+    with pytest.raises(AdapterMetadataValidationError, match="timestamps.started_at must be"):
+        validate_adapter_metadata(metadata)
 
 
 def test_metadata_cli_writes_local_json(tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -72,13 +73,26 @@ def require_string_list(value: Any, field_name: str) -> tuple[str, ...]:
 
 def require_local_artifact_path(value: Any, field_name: str, local_root: str) -> str:
     raw_path = require_non_empty_string(value, field_name)
-    path = Path(raw_path).expanduser()
+    path = Path(raw_path).expanduser().resolve()
     if not path.is_absolute():
         raise AdapterMetadataValidationError(f"{field_name} must be an absolute local path")
-    local_root_path = Path(local_root).expanduser()
+    local_root_path = Path(local_root).expanduser().resolve()
     if not path.is_relative_to(local_root_path):
         raise AdapterMetadataValidationError(f"{field_name} must be under local root: {local_root}")
     return str(path)
+
+
+def require_utc_timestamp(value: Any, field_name: str) -> str:
+    raw_value = require_non_empty_string(value, field_name)
+    if not raw_value.endswith("Z"):
+        raise AdapterMetadataValidationError(f"{field_name} must be an ISO-8601 UTC timestamp")
+    try:
+        datetime.fromisoformat(raw_value.removesuffix("Z") + "+00:00")
+    except ValueError as exc:
+        raise AdapterMetadataValidationError(
+            f"{field_name} must be an ISO-8601 UTC timestamp"
+        ) from exc
+    return raw_value
 
 
 def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
@@ -98,6 +112,16 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
             "status must be one of: " + ", ".join(sorted(STATUS_VALUES))
         )
 
+    artifact_policy = require_mapping(payload["local_artifact_policy"], "local_artifact_policy")
+    local_root = require_non_empty_string(
+        artifact_policy.get("local_root"),
+        "local_artifact_policy.local_root",
+    )
+    require_bool(
+        artifact_policy.get("large_artifacts_ignored"),
+        "local_artifact_policy.large_artifacts_ignored",
+    )
+
     model = require_mapping(payload["model"], "model")
     require_non_empty_string(model.get("id"), "model.id")
     require_non_empty_string(model.get("provider"), "model.provider")
@@ -107,16 +131,19 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
     require_non_empty_string(dataset.get("version"), "dataset.version")
     require_non_empty_string(dataset.get("path"), "dataset.path")
     require_non_empty_string(dataset.get("sha256"), "dataset.sha256")
+    training_input = require_mapping(dataset.get("training_input"), "dataset.training_input")
+    require_local_artifact_path(
+        training_input.get("path"),
+        "dataset.training_input.path",
+        local_root,
+    )
+    require_non_empty_string(training_input.get("sha256"), "dataset.training_input.sha256")
 
     config = require_mapping(payload["config"], "config")
     require_non_empty_string(config.get("source_path"), "config.source_path")
     require_non_empty_string(config.get("source_sha256"), "config.source_sha256")
     require_non_empty_string(config.get("generated_path"), "config.generated_path")
     require_non_empty_string(config.get("generated_sha256"), "config.generated_sha256")
-
-    artifact_policy = require_mapping(payload["local_artifact_policy"], "local_artifact_policy")
-    local_root = require_non_empty_string(artifact_policy.get("local_root"), "local_artifact_policy.local_root")
-    require_bool(artifact_policy.get("large_artifacts_ignored"), "local_artifact_policy.large_artifacts_ignored")
 
     adapter = require_mapping(payload["adapter"], "adapter")
     require_local_artifact_path(adapter.get("path"), "adapter.path", local_root)
@@ -125,6 +152,15 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
         require_bool(adapter.get("exists"), "adapter.exists")
         if not adapter["exists"]:
             raise AdapterMetadataValidationError("adapter.exists must be true for executed metadata")
+        require_bool(adapter.get("is_directory"), "adapter.is_directory")
+        if not adapter["is_directory"]:
+            raise AdapterMetadataValidationError("adapter.is_directory must be true for executed metadata")
+        markers = require_string_list(adapter.get("marker_files"), "adapter.marker_files")
+        expected_markers = {"adapter_config.json", "adapters.safetensors", "adapter.safetensors"}
+        if not any(marker in expected_markers for marker in markers):
+            raise AdapterMetadataValidationError(
+                "executed adapter metadata must include an adapter marker file"
+            )
 
     training = require_mapping(payload["training"], "training")
     rank = require_number(training.get("rank"), "training.rank")
@@ -141,10 +177,10 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
         raise AdapterMetadataValidationError("training.epochs must be null or an integer")
 
     timestamps = require_mapping(payload["timestamps"], "timestamps")
-    require_non_empty_string(timestamps.get("created_at"), "timestamps.created_at")
+    require_utc_timestamp(timestamps.get("created_at"), "timestamps.created_at")
     if status == "executed":
-        require_non_empty_string(timestamps.get("started_at"), "timestamps.started_at")
-        require_non_empty_string(timestamps.get("ended_at"), "timestamps.ended_at")
+        require_utc_timestamp(timestamps.get("started_at"), "timestamps.started_at")
+        require_utc_timestamp(timestamps.get("ended_at"), "timestamps.ended_at")
 
     validation = require_mapping(payload["validation"], "validation")
     require_bool(validation.get("is_dry_run_placeholder"), "validation.is_dry_run_placeholder")

@@ -73,6 +73,7 @@ def build_metadata(
     plan = load_json(run_plan_path)
     training = require_plan_training(plan)
     dataset_path = require_plan_path(plan, "dataset_path")
+    training_input_path = require_plan_path(plan, "train_data_path")
     source_config_path = require_plan_path(plan, "config_path")
     generated_config_path = require_plan_path(plan, "mlx_config_path")
     adapter_path = require_plan_path(plan, "adapter_path")
@@ -81,6 +82,8 @@ def build_metadata(
 
     placeholder = status != "executed"
     adapter_exists = adapter_path.exists()
+    adapter_is_directory = adapter_path.is_dir()
+    adapter_markers = sorted(path.name for path in adapter_path.iterdir()) if adapter_is_directory else []
     metadata = {
         "metadata_version": METADATA_VERSION,
         "run_id": plan.get("run_id"),
@@ -94,6 +97,10 @@ def build_metadata(
             "version": dataset_version,
             "path": str(dataset_path),
             "sha256": file_sha256(dataset_path),
+            "training_input": {
+                "path": str(training_input_path),
+                "sha256": file_sha256(training_input_path),
+            },
         },
         "config": {
             "source_path": str(source_config_path),
@@ -104,6 +111,8 @@ def build_metadata(
         "adapter": {
             "path": str(adapter_path),
             "exists": adapter_exists,
+            "is_directory": adapter_is_directory,
+            "marker_files": adapter_markers,
             "metadata_path": str(metadata_output.expanduser().resolve()),
         },
         "training": {
