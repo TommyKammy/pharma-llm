@@ -152,6 +152,26 @@ def test_validate_adapter_metadata_rejects_executed_placeholder(tmp_path: Path) 
         validate_adapter_metadata(metadata)
 
 
+def test_validate_adapter_metadata_rejects_failed_placeholder(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="failed",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at="2026-06-10T01:00:00Z",
+        ended_at="2026-06-10T01:30:00Z",
+        status_note="Local training failed before adapter creation.",
+    )
+    metadata["validation"]["is_dry_run_placeholder"] = True
+
+    with pytest.raises(AdapterMetadataValidationError, match="failed metadata must not"):
+        validate_adapter_metadata(metadata)
+
+
 def test_build_metadata_rejects_output_outside_local_root(tmp_path: Path) -> None:
     run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
 
@@ -176,6 +196,28 @@ def test_build_metadata_rejects_output_collision_with_run_plan(tmp_path: Path) -
         build_metadata(
             run_plan_path=run_plan_path,
             metadata_output=run_plan_path,
+            status="planned",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at=None,
+            ended_at=None,
+            status_note="Operator checklist prepared; training not executed in CI.",
+        )
+
+
+@pytest.mark.parametrize("plan_key", ["dataset_path", "config_path"])
+def test_build_metadata_rejects_output_collision_with_source_inputs(
+    tmp_path: Path,
+    plan_key: str,
+) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    plan = json.loads(run_plan_path.read_text(encoding="utf-8"))
+
+    with pytest.raises(ValueError, match="metadata output must differ from"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=Path(plan[plan_key]),
             status="planned",
             dataset_version="sft-v0.1",
             model_id="qwen/qwen3.6-27b-base",
@@ -261,6 +303,44 @@ def test_build_metadata_hashes_materialized_training_input(tmp_path: Path) -> No
     assert metadata["dataset"]["path"] == plan["dataset_path"]
     assert metadata["dataset"]["training_input"]["path"] == plan["train_data_path"]
     assert metadata["dataset"]["sha256"] != metadata["dataset"]["training_input"]["sha256"]
+
+
+def test_build_metadata_rejects_local_root_mismatch(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+
+    with pytest.raises(ValueError, match="--local-root must equal run plan local_root"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="planned",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=tmp_path,
+            started_at=None,
+            ended_at=None,
+            status_note="Operator checklist prepared; training not executed in CI.",
+        )
+
+
+def test_build_metadata_rejects_generated_config_drift(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    plan = json.loads(run_plan_path.read_text(encoding="utf-8"))
+    Path(plan["mlx_config_path"]).write_text("rank: 999\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="generated MLX config must match run plan"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="planned",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at=None,
+            ended_at=None,
+            status_note="Operator checklist prepared; training not executed in CI.",
+        )
 
 
 def test_build_metadata_rejects_executed_adapter_file(tmp_path: Path) -> None:

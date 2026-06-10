@@ -10,6 +10,8 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
@@ -18,12 +20,31 @@ from pharma_llm_lab.training.lora_metadata import (  # noqa: E402
     AdapterMetadataValidationError,
     validate_adapter_metadata,
 )
+from scripts.run_mlx_lora import dump_simple_yaml  # noqa: E402
 
 DEFAULT_LOCAL_ROOT = Path("/Users/tsinfra/Dev/pharma-llm/local")
 DEFAULT_MODEL_ID = "qwen/qwen3.6-27b-base"
 DEFAULT_DATASET_VERSION = "sft-v0.1"
 DEFAULT_PLANNED_STATUS_NOTE = "Dry-run metadata placeholder; update to executed only after local training completes."
 MLX_SPLIT_NAMES = ("train.jsonl", "valid.jsonl", "test.jsonl")
+MLX_CONFIG_FIELD_ORDER = (
+    "model",
+    "mask_prompt",
+    "train",
+    "data",
+    "adapter_path",
+    "iters",
+    "batch_size",
+    "num_layers",
+    "max_seq_length",
+    "learning_rate",
+    "steps_per_report",
+    "steps_per_eval",
+    "save_every",
+    "seed",
+    "lora_parameters",
+)
+LORA_PARAMETER_FIELD_ORDER = ("rank", "scale", "dropout", "keys")
 
 
 def file_sha256(path: Path) -> str:
@@ -60,6 +81,21 @@ def require_plan_training(plan: dict[str, Any]) -> dict[str, Any]:
     return training
 
 
+def require_plan_mapping(plan: dict[str, Any], key: str) -> dict[str, Any]:
+    value = plan.get(key)
+    if not isinstance(value, dict):
+        raise ValueError(f"run plan missing object: {key}")
+    return value
+
+
+def require_plan_local_root(plan: dict[str, Any], local_root: Path) -> Path:
+    plan_local_root = require_plan_path(plan, "local_root")
+    supplied_local_root = local_root.expanduser().resolve()
+    if supplied_local_root != plan_local_root:
+        raise ValueError(f"--local-root must equal run plan local_root: {plan_local_root}")
+    return plan_local_root
+
+
 def mlx_split_paths(plan: dict[str, Any]) -> tuple[Path, ...]:
     mlx_data_dir = require_plan_path(plan, "mlx_data_dir")
     return tuple(mlx_data_dir / split_name for split_name in MLX_SPLIT_NAMES)
@@ -74,6 +110,8 @@ def require_metadata_output_does_not_collide(
     resolved_output = metadata_output.expanduser().resolve()
     reserved_paths = {
         "run plan": run_plan_path.expanduser().resolve(),
+        "data.dataset_path": require_plan_path(plan, "dataset_path"),
+        "config.source_path": require_plan_path(plan, "config_path"),
         "output.adapter_path": require_plan_path(plan, "adapter_path"),
         "output.run_output_path": require_plan_path(plan, "run_output_path"),
         "output.mlx_config_path": require_plan_path(plan, "mlx_config_path"),
@@ -86,6 +124,31 @@ def require_metadata_output_does_not_collide(
     if resolved_output.is_relative_to(adapter_path):
         raise ValueError(f"metadata output must not be under output.adapter_path: {adapter_path}")
     return resolved_output
+
+
+def ordered_mapping(mapping: dict[str, Any], field_order: tuple[str, ...]) -> dict[str, Any]:
+    ordered = {key: mapping[key] for key in field_order if key in mapping}
+    ordered.update({key: value for key, value in mapping.items() if key not in ordered})
+    return ordered
+
+
+def canonical_mlx_config_mapping(mapping: dict[str, Any]) -> dict[str, Any]:
+    canonical = ordered_mapping(mapping, MLX_CONFIG_FIELD_ORDER)
+    lora_parameters = canonical.get("lora_parameters")
+    if isinstance(lora_parameters, dict):
+        canonical["lora_parameters"] = ordered_mapping(lora_parameters, LORA_PARAMETER_FIELD_ORDER)
+    return canonical
+
+
+def require_generated_config_matches_plan(plan: dict[str, Any]) -> None:
+    generated_config_path = require_plan_path(plan, "mlx_config_path")
+    expected_config = require_plan_mapping(plan, "mlx_config")
+    expected_yaml = dump_simple_yaml(canonical_mlx_config_mapping(expected_config))
+    actual_yaml = generated_config_path.read_text(encoding="utf-8")
+    if actual_yaml != expected_yaml:
+        raise ValueError(
+            "generated MLX config must match run plan mlx_config; rerun dry-run before recording metadata"
+        )
 
 
 def build_metadata(
@@ -102,6 +165,8 @@ def build_metadata(
 ) -> dict[str, Any]:
     plan = load_json(run_plan_path)
     training = require_plan_training(plan)
+    local_root_path = require_plan_local_root(plan, local_root)
+    require_generated_config_matches_plan(plan)
     resolved_metadata_output = require_metadata_output_does_not_collide(
         plan=plan,
         run_plan_path=run_plan_path,
@@ -113,7 +178,6 @@ def build_metadata(
     generated_config_path = require_plan_path(plan, "mlx_config_path")
     adapter_path = require_plan_path(plan, "adapter_path")
     model_path = require_plan_path(plan, "model_path")
-    local_root_path = local_root.expanduser().resolve()
 
     placeholder = status == "planned"
     adapter_exists = adapter_path.exists()

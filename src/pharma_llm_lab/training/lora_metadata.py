@@ -258,9 +258,9 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
 
     validation = require_mapping(payload["validation"], "validation")
     require_bool(validation.get("is_dry_run_placeholder"), "validation.is_dry_run_placeholder")
-    if status == "executed" and validation["is_dry_run_placeholder"]:
+    if status != "planned" and validation["is_dry_run_placeholder"]:
         raise AdapterMetadataValidationError(
-            "executed metadata must not be marked as a dry-run placeholder"
+            f"{status} metadata must not be marked as a dry-run placeholder"
         )
     require_non_empty_string(validation.get("status_note"), "validation.status_note")
 
