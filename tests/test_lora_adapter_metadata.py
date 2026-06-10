@@ -94,6 +94,7 @@ def test_build_metadata_records_planned_placeholder(tmp_path: Path) -> None:
     assert validated["validation"]["is_dry_run_placeholder"] is True
     assert validated["adapter"]["exists"] is False
     assert validated["training"]["epochs"] is None
+    assert validated["training"]["mask_prompt"] is True
     assert validated["training"]["num_layers"] == -1
     assert validated["training"]["seed"] == 0
     assert validated["dataset"]["training_input"]["path"].endswith("mlx_data/train.jsonl")
@@ -459,6 +460,88 @@ def test_validate_adapter_metadata_rejects_nonpositive_training_count(tmp_path: 
     metadata["training"]["max_seq_length"] = 0
 
     with pytest.raises(AdapterMetadataValidationError, match="training.max_seq_length must be positive"):
+        validate_adapter_metadata(metadata)
+
+
+def test_validate_adapter_metadata_rejects_unknown_target_module(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="planned",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at=None,
+        ended_at=None,
+        status_note="Operator checklist prepared; training not executed in CI.",
+    )
+    metadata["training"]["target_modules"] = ["foo"]
+
+    with pytest.raises(AdapterMetadataValidationError, match="unsupported Qwen MLX module"):
+        validate_adapter_metadata(metadata)
+
+
+def test_validate_adapter_metadata_rejects_missing_mask_prompt(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="planned",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at=None,
+        ended_at=None,
+        status_note="Operator checklist prepared; training not executed in CI.",
+    )
+    metadata["training"].pop("mask_prompt")
+
+    with pytest.raises(AdapterMetadataValidationError, match="training.mask_prompt must be a boolean"):
+        validate_adapter_metadata(metadata)
+
+
+def test_validate_adapter_metadata_rejects_bad_sha256(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="planned",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at=None,
+        ended_at=None,
+        status_note="Operator checklist prepared; training not executed in CI.",
+    )
+    metadata["dataset"]["sha256"] = "bad"
+
+    with pytest.raises(AdapterMetadataValidationError, match="dataset.sha256 must be"):
+        validate_adapter_metadata(metadata)
+
+
+def test_validate_adapter_metadata_rejects_generated_config_outside_local_root(
+    tmp_path: Path,
+) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="planned",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at=None,
+        ended_at=None,
+        status_note="Operator checklist prepared; training not executed in CI.",
+    )
+    metadata["config"]["generated_path"] = str(tmp_path / "generated.yaml")
+
+    with pytest.raises(AdapterMetadataValidationError, match="config.generated_path must be under"):
         validate_adapter_metadata(metadata)
 
 

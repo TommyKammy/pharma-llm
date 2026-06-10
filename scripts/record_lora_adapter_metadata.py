@@ -154,6 +154,7 @@ def build_metadata(
             "rank": training.get("rank"),
             "scale": training.get("scale"),
             "dropout": training.get("dropout"),
+            "mask_prompt": training.get("mask_prompt"),
             "target_modules": training.get("target_modules"),
             "epochs": None,
             "max_seq_length": training.get("max_seq_length"),

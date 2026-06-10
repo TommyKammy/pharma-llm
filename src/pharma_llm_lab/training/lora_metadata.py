@@ -8,6 +8,14 @@ from typing import Any, Literal
 MetadataStatus = Literal["planned", "executed", "failed"]
 
 METADATA_VERSION = "qwen-sft-lora-v1-metadata"
+QWEN_TARGET_MODULE_KEYS = frozenset(
+    {
+        "self_attn.q_proj",
+        "self_attn.k_proj",
+        "self_attn.v_proj",
+        "self_attn.o_proj",
+    }
+)
 REQUIRED_TOP_LEVEL_FIELDS = {
     "metadata_version",
     "run_id",
@@ -46,6 +54,13 @@ def require_non_empty_string(value: Any, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise AdapterMetadataValidationError(f"{field_name} must be a non-empty string")
     return value
+
+
+def require_sha256(value: Any, field_name: str) -> str:
+    digest = require_non_empty_string(value, field_name)
+    if len(digest) != 64 or any(char not in "0123456789abcdefABCDEF" for char in digest):
+        raise AdapterMetadataValidationError(f"{field_name} must be a 64-character SHA-256 hex digest")
+    return digest
 
 
 def require_bool(value: Any, field_name: str) -> bool:
@@ -99,6 +114,19 @@ def require_string_list(value: Any, field_name: str) -> tuple[str, ...]:
             raise AdapterMetadataValidationError(f"{field_name} must be a non-empty string list")
         parsed.append(item)
     return tuple(parsed)
+
+
+def require_qwen_target_modules(value: Any, field_name: str) -> tuple[str, ...]:
+    modules = require_string_list(value, field_name)
+    unknown_modules = sorted(set(modules) - QWEN_TARGET_MODULE_KEYS)
+    if unknown_modules:
+        allowed = ", ".join(sorted(QWEN_TARGET_MODULE_KEYS))
+        unknown = ", ".join(unknown_modules)
+        raise AdapterMetadataValidationError(
+            f"{field_name} contains unsupported Qwen MLX module key(s): {unknown}; "
+            f"allowed keys: {allowed}"
+        )
+    return modules
 
 
 def require_local_artifact_path(value: Any, field_name: str, local_root: str) -> str:
@@ -165,20 +193,20 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
     dataset = require_mapping(payload["dataset"], "dataset")
     require_non_empty_string(dataset.get("version"), "dataset.version")
     require_non_empty_string(dataset.get("path"), "dataset.path")
-    require_non_empty_string(dataset.get("sha256"), "dataset.sha256")
+    require_sha256(dataset.get("sha256"), "dataset.sha256")
     training_input = require_mapping(dataset.get("training_input"), "dataset.training_input")
     require_local_artifact_path(
         training_input.get("path"),
         "dataset.training_input.path",
         local_root,
     )
-    require_non_empty_string(training_input.get("sha256"), "dataset.training_input.sha256")
+    require_sha256(training_input.get("sha256"), "dataset.training_input.sha256")
 
     config = require_mapping(payload["config"], "config")
     require_non_empty_string(config.get("source_path"), "config.source_path")
-    require_non_empty_string(config.get("source_sha256"), "config.source_sha256")
-    require_non_empty_string(config.get("generated_path"), "config.generated_path")
-    require_non_empty_string(config.get("generated_sha256"), "config.generated_sha256")
+    require_sha256(config.get("source_sha256"), "config.source_sha256")
+    require_local_artifact_path(config.get("generated_path"), "config.generated_path", local_root)
+    require_sha256(config.get("generated_sha256"), "config.generated_sha256")
 
     adapter = require_mapping(payload["adapter"], "adapter")
     require_local_artifact_path(adapter.get("path"), "adapter.path", local_root)
@@ -201,7 +229,8 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
     require_positive_int(training.get("rank"), "training.rank")
     require_positive_number(training.get("scale"), "training.scale")
     require_non_negative_number(training.get("dropout"), "training.dropout")
-    require_string_list(training.get("target_modules"), "training.target_modules")
+    require_bool(training.get("mask_prompt"), "training.mask_prompt")
+    require_qwen_target_modules(training.get("target_modules"), "training.target_modules")
     require_positive_int(training.get("max_seq_length"), "training.max_seq_length")
     require_positive_int(training.get("iters"), "training.iters")
     require_positive_int(training.get("batch_size"), "training.batch_size")
