@@ -156,10 +156,10 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
         if not adapter["is_directory"]:
             raise AdapterMetadataValidationError("adapter.is_directory must be true for executed metadata")
         markers = require_string_list(adapter.get("marker_files"), "adapter.marker_files")
-        expected_markers = {"adapter_config.json", "adapters.safetensors", "adapter.safetensors"}
-        if not any(marker in expected_markers for marker in markers):
+        expected_weight_markers = {"adapters.safetensors", "adapter.safetensors"}
+        if not any(marker in expected_weight_markers for marker in markers):
             raise AdapterMetadataValidationError(
-                "executed adapter metadata must include an adapter marker file"
+                "executed adapter metadata must include an adapter weights file"
             )
 
     training = require_mapping(payload["training"], "training")
@@ -178,6 +178,10 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
 
     timestamps = require_mapping(payload["timestamps"], "timestamps")
     require_utc_timestamp(timestamps.get("created_at"), "timestamps.created_at")
+    if timestamps.get("started_at") is not None:
+        require_utc_timestamp(timestamps.get("started_at"), "timestamps.started_at")
+    if timestamps.get("ended_at") is not None:
+        require_utc_timestamp(timestamps.get("ended_at"), "timestamps.ended_at")
     if status == "executed":
         require_utc_timestamp(timestamps.get("started_at"), "timestamps.started_at")
         require_utc_timestamp(timestamps.get("ended_at"), "timestamps.ended_at")

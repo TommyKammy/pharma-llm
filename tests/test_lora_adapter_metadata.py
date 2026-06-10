@@ -102,6 +102,7 @@ def test_build_metadata_records_executed_adapter(tmp_path: Path) -> None:
     run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
     adapter_path.mkdir(parents=True)
     (adapter_path / "adapter_config.json").write_text("{}\n", encoding="utf-8")
+    (adapter_path / "adapters.safetensors").write_text("weights\n", encoding="utf-8")
     metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
 
     metadata = build_metadata(
@@ -122,6 +123,7 @@ def test_build_metadata_records_executed_adapter(tmp_path: Path) -> None:
     assert validated["adapter"]["exists"] is True
     assert validated["adapter"]["is_directory"] is True
     assert "adapter_config.json" in validated["adapter"]["marker_files"]
+    assert "adapters.safetensors" in validated["adapter"]["marker_files"]
     assert validated["timestamps"]["started_at"] == "2026-06-10T01:00:00Z"
 
 
@@ -129,6 +131,7 @@ def test_validate_adapter_metadata_rejects_executed_placeholder(tmp_path: Path) 
     run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
     adapter_path.mkdir(parents=True)
     (adapter_path / "adapter_config.json").write_text("{}\n", encoding="utf-8")
+    (adapter_path / "adapters.safetensors").write_text("weights\n", encoding="utf-8")
     metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
     metadata = build_metadata(
         run_plan_path=run_plan_path,
@@ -154,6 +157,23 @@ def test_build_metadata_rejects_output_outside_local_root(tmp_path: Path) -> Non
         build_metadata(
             run_plan_path=run_plan_path,
             metadata_output=tmp_path / "tracked_metadata.json",
+            status="planned",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at=None,
+            ended_at=None,
+            status_note="Operator checklist prepared; training not executed in CI.",
+        )
+
+
+def test_build_metadata_rejects_output_collision_with_run_plan(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+
+    with pytest.raises(ValueError, match="metadata output must differ from"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=run_plan_path,
             status="planned",
             dataset_version="sft-v0.1",
             model_id="qwen/qwen3.6-27b-base",
@@ -227,10 +247,31 @@ def test_build_metadata_rejects_executed_adapter_file(tmp_path: Path) -> None:
         )
 
 
+def test_build_metadata_rejects_executed_adapter_without_weights(tmp_path: Path) -> None:
+    run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
+    adapter_path.mkdir(parents=True)
+    (adapter_path / "adapter_config.json").write_text("{}\n", encoding="utf-8")
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+
+    with pytest.raises(AdapterMetadataValidationError, match="adapter weights file"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="executed",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at="2026-06-10T01:00:00Z",
+            ended_at="2026-06-10T03:00:00Z",
+            status_note="Local training completed.",
+        )
+
+
 def test_validate_adapter_metadata_rejects_bad_executed_timestamps(tmp_path: Path) -> None:
     run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
     adapter_path.mkdir(parents=True)
     (adapter_path / "adapter_config.json").write_text("{}\n", encoding="utf-8")
+    (adapter_path / "adapters.safetensors").write_text("weights\n", encoding="utf-8")
     metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
     metadata = build_metadata(
         run_plan_path=run_plan_path,
@@ -247,6 +288,24 @@ def test_validate_adapter_metadata_rejects_bad_executed_timestamps(tmp_path: Pat
 
     with pytest.raises(AdapterMetadataValidationError, match="timestamps.started_at must be"):
         validate_adapter_metadata(metadata)
+
+
+def test_build_metadata_rejects_bad_failed_timestamps(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+
+    with pytest.raises(AdapterMetadataValidationError, match="timestamps.started_at must be"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="failed",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at="bad",
+            ended_at=None,
+            status_note="Local training failed before adapter creation.",
+        )
 
 
 def test_metadata_cli_writes_local_json(tmp_path: Path) -> None:

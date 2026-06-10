@@ -22,6 +22,7 @@ from pharma_llm_lab.training.lora_metadata import (  # noqa: E402
 DEFAULT_LOCAL_ROOT = Path("/Users/tsinfra/Dev/pharma-llm/local")
 DEFAULT_MODEL_ID = "qwen/qwen3.6-27b-base"
 DEFAULT_DATASET_VERSION = "sft-v0.1"
+MLX_SPLIT_NAMES = ("train.jsonl", "valid.jsonl", "test.jsonl")
 
 
 def file_sha256(path: Path) -> str:
@@ -58,6 +59,30 @@ def require_plan_training(plan: dict[str, Any]) -> dict[str, Any]:
     return training
 
 
+def mlx_split_paths(plan: dict[str, Any]) -> tuple[Path, ...]:
+    mlx_data_dir = require_plan_path(plan, "mlx_data_dir")
+    return tuple(mlx_data_dir / split_name for split_name in MLX_SPLIT_NAMES)
+
+
+def require_metadata_output_does_not_collide(
+    *,
+    plan: dict[str, Any],
+    run_plan_path: Path,
+    metadata_output: Path,
+) -> Path:
+    resolved_output = metadata_output.expanduser().resolve()
+    reserved_paths = {
+        "run plan": run_plan_path.expanduser().resolve(),
+        "output.run_output_path": require_plan_path(plan, "run_output_path"),
+        "output.mlx_config_path": require_plan_path(plan, "mlx_config_path"),
+        **{f"MLX split {path.name}": path for path in mlx_split_paths(plan)},
+    }
+    for label, path in reserved_paths.items():
+        if resolved_output == path:
+            raise ValueError(f"metadata output must differ from {label}: {path}")
+    return resolved_output
+
+
 def build_metadata(
     *,
     run_plan_path: Path,
@@ -72,6 +97,11 @@ def build_metadata(
 ) -> dict[str, Any]:
     plan = load_json(run_plan_path)
     training = require_plan_training(plan)
+    resolved_metadata_output = require_metadata_output_does_not_collide(
+        plan=plan,
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_output,
+    )
     dataset_path = require_plan_path(plan, "dataset_path")
     training_input_path = require_plan_path(plan, "train_data_path")
     source_config_path = require_plan_path(plan, "config_path")
@@ -113,7 +143,7 @@ def build_metadata(
             "exists": adapter_exists,
             "is_directory": adapter_is_directory,
             "marker_files": adapter_markers,
-            "metadata_path": str(metadata_output.expanduser().resolve()),
+            "metadata_path": str(resolved_metadata_output),
         },
         "training": {
             "rank": training.get("rank"),
