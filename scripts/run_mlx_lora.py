@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import tomllib
@@ -27,6 +28,7 @@ RUN_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,79}$")
 class MlxLoraTrainingPlan:
     run_id: str
     config_path: Path
+    config_sha256: str
     local_root: Path
     model_path: Path
     dataset_path: Path
@@ -88,6 +90,7 @@ class MlxLoraTrainingPlan:
         return {
             "run_id": self.run_id,
             "config_path": str(self.config_path),
+            "config_sha256": self.config_sha256,
             "local_root": str(self.local_root),
             "model_path": str(self.model_path),
             "dataset_path": str(self.dataset_path),
@@ -222,6 +225,14 @@ def load_config(path: Path) -> dict[str, Any]:
         return tomllib.load(handle)
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def mlx_split_paths(mlx_data_dir: Path) -> tuple[Path, ...]:
     return tuple(mlx_data_dir / split_name for split_name in MLX_SPLIT_NAMES)
 
@@ -325,6 +336,7 @@ def build_plan(
     return MlxLoraTrainingPlan(
         run_id=run_id,
         config_path=resolved_config,
+        config_sha256=file_sha256(resolved_config),
         local_root=local_root.expanduser().resolve(),
         model_path=model_path,
         dataset_path=dataset_path,

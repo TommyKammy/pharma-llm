@@ -74,6 +74,15 @@ def require_plan_path(plan: dict[str, Any], key: str) -> Path:
     return Path(value).expanduser().resolve()
 
 
+def require_plan_digest(plan: dict[str, Any], key: str) -> str:
+    value = plan.get(key)
+    if not isinstance(value, str) or len(value) != 64:
+        raise ValueError(f"run plan missing SHA-256 digest: {key}")
+    if any(char not in "0123456789abcdefABCDEF" for char in value):
+        raise ValueError(f"run plan invalid SHA-256 digest: {key}")
+    return value
+
+
 def require_plan_training(plan: dict[str, Any]) -> dict[str, Any]:
     training = plan.get("training")
     if not isinstance(training, dict):
@@ -151,6 +160,16 @@ def require_generated_config_matches_plan(plan: dict[str, Any]) -> None:
         )
 
 
+def require_source_config_matches_plan(plan: dict[str, Any]) -> None:
+    source_config_path = require_plan_path(plan, "config_path")
+    expected_digest = require_plan_digest(plan, "config_sha256")
+    actual_digest = file_sha256(source_config_path)
+    if actual_digest != expected_digest:
+        raise ValueError(
+            "source config must match run plan config_sha256; rerun dry-run before recording metadata"
+        )
+
+
 def build_metadata(
     *,
     run_plan_path: Path,
@@ -167,6 +186,7 @@ def build_metadata(
     training = require_plan_training(plan)
     local_root_path = require_plan_local_root(plan, local_root)
     require_generated_config_matches_plan(plan)
+    require_source_config_matches_plan(plan)
     resolved_metadata_output = require_metadata_output_does_not_collide(
         plan=plan,
         run_plan_path=run_plan_path,
@@ -182,7 +202,7 @@ def build_metadata(
     placeholder = status == "planned"
     adapter_exists = adapter_path.exists()
     adapter_is_directory = adapter_path.is_dir()
-    adapter_markers = sorted(path.name for path in adapter_path.iterdir()) if adapter_is_directory else []
+    adapter_markers = sorted(path.name for path in adapter_path.iterdir() if path.is_file()) if adapter_is_directory else []
     metadata = {
         "metadata_version": METADATA_VERSION,
         "run_id": plan.get("run_id"),

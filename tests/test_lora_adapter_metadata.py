@@ -172,6 +172,30 @@ def test_validate_adapter_metadata_rejects_failed_placeholder(tmp_path: Path) ->
         validate_adapter_metadata(metadata)
 
 
+def test_validate_adapter_metadata_rejects_relative_artifact_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="planned",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at=None,
+        ended_at=None,
+        status_note="Operator checklist prepared; training not executed in CI.",
+    )
+    monkeypatch.chdir(tmp_path)
+    metadata["adapter"]["metadata_path"] = "local/runs/phase6-test/adapter_metadata.json"
+
+    with pytest.raises(AdapterMetadataValidationError, match="adapter.metadata_path must be an absolute"):
+        validate_adapter_metadata(metadata)
+
+
 def test_build_metadata_rejects_output_outside_local_root(tmp_path: Path) -> None:
     run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
 
@@ -305,6 +329,26 @@ def test_build_metadata_hashes_materialized_training_input(tmp_path: Path) -> No
     assert metadata["dataset"]["sha256"] != metadata["dataset"]["training_input"]["sha256"]
 
 
+def test_build_metadata_rejects_source_config_drift(tmp_path: Path) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    plan = json.loads(run_plan_path.read_text(encoding="utf-8"))
+    Path(plan["config_path"]).write_text("[run]\nrun_id = \"changed\"\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="source config must match run plan config_sha256"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="planned",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at=None,
+            ended_at=None,
+            status_note="Operator checklist prepared; training not executed in CI.",
+        )
+
+
 def test_build_metadata_rejects_local_root_mismatch(tmp_path: Path) -> None:
     run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
     metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
@@ -367,6 +411,27 @@ def test_build_metadata_rejects_executed_adapter_without_weights(tmp_path: Path)
     run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
     adapter_path.mkdir(parents=True)
     (adapter_path / "adapter_config.json").write_text("{}\n", encoding="utf-8")
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+
+    with pytest.raises(AdapterMetadataValidationError, match="adapter weights file"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="executed",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at="2026-06-10T01:00:00Z",
+            ended_at="2026-06-10T03:00:00Z",
+            status_note="Local training completed.",
+        )
+
+
+def test_build_metadata_rejects_executed_adapter_weight_directory(tmp_path: Path) -> None:
+    run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
+    adapter_path.mkdir(parents=True)
+    (adapter_path / "adapter_config.json").write_text("{}\n", encoding="utf-8")
+    (adapter_path / "adapters.safetensors").mkdir()
     metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
 
     with pytest.raises(AdapterMetadataValidationError, match="adapter weights file"):
@@ -481,6 +546,25 @@ def test_build_metadata_marks_failed_runs_as_attempted(tmp_path: Path) -> None:
     )
 
     assert metadata["validation"]["is_dry_run_placeholder"] is False
+
+
+def test_build_metadata_rejects_planned_after_adapter_exists(tmp_path: Path) -> None:
+    run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
+    adapter_path.mkdir(parents=True)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+
+    with pytest.raises(AdapterMetadataValidationError, match="planned metadata must not"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="planned",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at=None,
+            ended_at=None,
+            status_note="Operator checklist prepared; training not executed in CI.",
+        )
 
 
 def test_validate_adapter_metadata_rejects_fractional_rank(tmp_path: Path) -> None:

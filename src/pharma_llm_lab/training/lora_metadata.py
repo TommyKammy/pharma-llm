@@ -131,9 +131,10 @@ def require_qwen_target_modules(value: Any, field_name: str) -> tuple[str, ...]:
 
 def require_local_artifact_path(value: Any, field_name: str, local_root: str) -> str:
     raw_path = require_non_empty_string(value, field_name)
-    path = Path(raw_path).expanduser().resolve()
-    if not path.is_absolute():
+    expanded_path = Path(raw_path).expanduser()
+    if not expanded_path.is_absolute():
         raise AdapterMetadataValidationError(f"{field_name} must be an absolute local path")
+    path = expanded_path.resolve()
     local_root_path = Path(local_root).expanduser().resolve()
     if not path.is_relative_to(local_root_path):
         raise AdapterMetadataValidationError(f"{field_name} must be under local root: {local_root}")
@@ -211,9 +212,13 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
     adapter = require_mapping(payload["adapter"], "adapter")
     require_local_artifact_path(adapter.get("path"), "adapter.path", local_root)
     require_local_artifact_path(adapter.get("metadata_path"), "adapter.metadata_path", local_root)
+    adapter_exists = require_bool(adapter.get("exists"), "adapter.exists")
+    if status == "planned" and adapter_exists:
+        raise AdapterMetadataValidationError(
+            "planned metadata must not point to an existing adapter"
+        )
     if status == "executed":
-        require_bool(adapter.get("exists"), "adapter.exists")
-        if not adapter["exists"]:
+        if not adapter_exists:
             raise AdapterMetadataValidationError("adapter.exists must be true for executed metadata")
         require_bool(adapter.get("is_directory"), "adapter.is_directory")
         if not adapter["is_directory"]:
