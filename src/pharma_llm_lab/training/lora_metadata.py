@@ -141,6 +141,14 @@ def require_local_artifact_path(value: Any, field_name: str, local_root: str) ->
     return str(path)
 
 
+def require_absolute_local_root(value: Any, field_name: str) -> str:
+    raw_path = require_non_empty_string(value, field_name)
+    expanded_path = Path(raw_path).expanduser()
+    if not expanded_path.is_absolute():
+        raise AdapterMetadataValidationError(f"{field_name} must be an absolute local path")
+    return str(expanded_path.resolve())
+
+
 def parse_utc_timestamp(value: Any, field_name: str) -> datetime:
     raw_value = require_non_empty_string(value, field_name)
     if "T" not in raw_value or not raw_value.endswith("Z"):
@@ -177,7 +185,7 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
         )
 
     artifact_policy = require_mapping(payload["local_artifact_policy"], "local_artifact_policy")
-    local_root = require_non_empty_string(
+    local_root = require_absolute_local_root(
         artifact_policy.get("local_root"),
         "local_artifact_policy.local_root",
     )
@@ -224,6 +232,10 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
         if not adapter["is_directory"]:
             raise AdapterMetadataValidationError("adapter.is_directory must be true for executed metadata")
         markers = require_string_list(adapter.get("marker_files"), "adapter.marker_files")
+        if "adapter_config.json" not in markers:
+            raise AdapterMetadataValidationError(
+                "executed adapter metadata must include adapter_config.json"
+            )
         expected_weight_markers = {"adapters.safetensors", "adapter.safetensors"}
         if not any(marker in expected_weight_markers for marker in markers):
             raise AdapterMetadataValidationError(

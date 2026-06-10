@@ -136,8 +136,10 @@ Re-run behavior:
 - Re-run `scripts/run_mlx_lora.py --dry-run` after changing config or dataset.
 - Re-record adapter metadata after every completed training attempt.
 - Use the metadata `config.source_sha256`, `config.generated_sha256`, and
-  `dataset.sha256` fields to identify which config and dataset produced an
-  adapter.
+  `dataset.training_input.sha256` fields to identify which config and
+  materialized MLX input produced an adapter. Treat `dataset.sha256` as the
+  source SFT JSONL digest, not as proof of the exact training split when local
+  inputs may have been regenerated.
 - Do not commit local `adapter_metadata.json`; it lives beside the local run
   plan and adapter artifacts for operator audit.
 

@@ -196,6 +196,33 @@ def test_validate_adapter_metadata_rejects_relative_artifact_path(
         validate_adapter_metadata(metadata)
 
 
+def test_validate_adapter_metadata_rejects_relative_local_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+    metadata = build_metadata(
+        run_plan_path=run_plan_path,
+        metadata_output=metadata_path,
+        status="planned",
+        dataset_version="sft-v0.1",
+        model_id="qwen/qwen3.6-27b-base",
+        local_root=local_root,
+        started_at=None,
+        ended_at=None,
+        status_note="Operator checklist prepared; training not executed in CI.",
+    )
+    monkeypatch.chdir(tmp_path)
+    metadata["local_artifact_policy"]["local_root"] = "local"
+
+    with pytest.raises(
+        AdapterMetadataValidationError,
+        match="local_artifact_policy.local_root must be an absolute",
+    ):
+        validate_adapter_metadata(metadata)
+
+
 def test_build_metadata_rejects_output_outside_local_root(tmp_path: Path) -> None:
     run_plan_path, local_root, _adapter_path = prepare_run_plan(tmp_path)
 
@@ -427,6 +454,26 @@ def test_build_metadata_rejects_executed_adapter_without_weights(tmp_path: Path)
         )
 
 
+def test_build_metadata_rejects_executed_adapter_without_config(tmp_path: Path) -> None:
+    run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
+    adapter_path.mkdir(parents=True)
+    (adapter_path / "adapters.safetensors").write_text("weights\n", encoding="utf-8")
+    metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
+
+    with pytest.raises(AdapterMetadataValidationError, match="adapter_config\\.json"):
+        build_metadata(
+            run_plan_path=run_plan_path,
+            metadata_output=metadata_path,
+            status="executed",
+            dataset_version="sft-v0.1",
+            model_id="qwen/qwen3.6-27b-base",
+            local_root=local_root,
+            started_at="2026-06-10T01:00:00Z",
+            ended_at="2026-06-10T03:00:00Z",
+            status_note="Local training completed.",
+        )
+
+
 def test_build_metadata_rejects_executed_adapter_weight_directory(tmp_path: Path) -> None:
     run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
     adapter_path.mkdir(parents=True)
@@ -474,6 +521,7 @@ def test_validate_adapter_metadata_rejects_bad_executed_timestamps(tmp_path: Pat
 def test_build_metadata_rejects_date_only_executed_timestamps(tmp_path: Path) -> None:
     run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
     adapter_path.mkdir(parents=True)
+    (adapter_path / "adapter_config.json").write_text("{}\n", encoding="utf-8")
     (adapter_path / "adapters.safetensors").write_text("weights\n", encoding="utf-8")
     metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
 
@@ -512,6 +560,7 @@ def test_build_metadata_rejects_bad_failed_timestamps(tmp_path: Path) -> None:
 def test_build_metadata_rejects_reversed_executed_timestamps(tmp_path: Path) -> None:
     run_plan_path, local_root, adapter_path = prepare_run_plan(tmp_path)
     adapter_path.mkdir(parents=True)
+    (adapter_path / "adapter_config.json").write_text("{}\n", encoding="utf-8")
     (adapter_path / "adapters.safetensors").write_text("weights\n", encoding="utf-8")
     metadata_path = local_root / "runs" / "phase6-test" / "adapter_metadata.json"
 
