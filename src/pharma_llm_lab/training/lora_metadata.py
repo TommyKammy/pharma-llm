@@ -68,6 +68,28 @@ def require_positive_int(value: Any, field_name: str) -> int:
     return value
 
 
+def require_int_at_least(value: Any, field_name: str, minimum: int) -> int:
+    if type(value) is not int:
+        raise AdapterMetadataValidationError(f"{field_name} must be an integer")
+    if value < minimum:
+        raise AdapterMetadataValidationError(f"{field_name} must be >= {minimum}")
+    return value
+
+
+def require_positive_number(value: Any, field_name: str) -> int | float:
+    parsed = require_number(value, field_name)
+    if parsed <= 0:
+        raise AdapterMetadataValidationError(f"{field_name} must be positive")
+    return parsed
+
+
+def require_non_negative_number(value: Any, field_name: str) -> int | float:
+    parsed = require_number(value, field_name)
+    if parsed < 0:
+        raise AdapterMetadataValidationError(f"{field_name} must be non-negative")
+    return parsed
+
+
 def require_string_list(value: Any, field_name: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not value:
         raise AdapterMetadataValidationError(f"{field_name} must be a non-empty string list")
@@ -92,7 +114,7 @@ def require_local_artifact_path(value: Any, field_name: str, local_root: str) ->
 
 def parse_utc_timestamp(value: Any, field_name: str) -> datetime:
     raw_value = require_non_empty_string(value, field_name)
-    if not raw_value.endswith("Z"):
+    if "T" not in raw_value or not raw_value.endswith("Z"):
         raise AdapterMetadataValidationError(f"{field_name} must be an ISO-8601 UTC timestamp")
     try:
         return datetime.fromisoformat(raw_value.removesuffix("Z") + "+00:00")
@@ -177,11 +199,15 @@ def validate_adapter_metadata(payload: dict[str, Any]) -> AdapterMetadata:
 
     training = require_mapping(payload["training"], "training")
     require_positive_int(training.get("rank"), "training.rank")
-    require_number(training.get("scale"), "training.scale")
-    require_number(training.get("dropout"), "training.dropout")
+    require_positive_number(training.get("scale"), "training.scale")
+    require_non_negative_number(training.get("dropout"), "training.dropout")
     require_string_list(training.get("target_modules"), "training.target_modules")
     require_positive_int(training.get("max_seq_length"), "training.max_seq_length")
     require_positive_int(training.get("iters"), "training.iters")
+    require_positive_int(training.get("batch_size"), "training.batch_size")
+    require_positive_number(training.get("learning_rate"), "training.learning_rate")
+    require_int_at_least(training.get("num_layers"), "training.num_layers", -1)
+    require_int_at_least(training.get("seed"), "training.seed", 0)
     if "epochs" not in training:
         raise AdapterMetadataValidationError("training.epochs must be present")
     if training["epochs"] is not None and type(training["epochs"]) is not int:

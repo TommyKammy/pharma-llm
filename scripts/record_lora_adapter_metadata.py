@@ -22,6 +22,7 @@ from pharma_llm_lab.training.lora_metadata import (  # noqa: E402
 DEFAULT_LOCAL_ROOT = Path("/Users/tsinfra/Dev/pharma-llm/local")
 DEFAULT_MODEL_ID = "qwen/qwen3.6-27b-base"
 DEFAULT_DATASET_VERSION = "sft-v0.1"
+DEFAULT_PLANNED_STATUS_NOTE = "Dry-run metadata placeholder; update to executed only after local training completes."
 MLX_SPLIT_NAMES = ("train.jsonl", "valid.jsonl", "test.jsonl")
 
 
@@ -81,6 +82,9 @@ def require_metadata_output_does_not_collide(
     for label, path in reserved_paths.items():
         if resolved_output == path:
             raise ValueError(f"metadata output must differ from {label}: {path}")
+    adapter_path = reserved_paths["output.adapter_path"]
+    if resolved_output.is_relative_to(adapter_path):
+        raise ValueError(f"metadata output must not be under output.adapter_path: {adapter_path}")
     return resolved_output
 
 
@@ -203,7 +207,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ended-at", default=None)
     parser.add_argument(
         "--status-note",
-        default="Dry-run metadata placeholder; update to executed only after local training completes.",
+        default=None,
     )
     return parser
 
@@ -211,6 +215,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.status == "planned":
+        status_note = args.status_note or DEFAULT_PLANNED_STATUS_NOTE
+    elif args.status_note is None:
+        parser.error("--status-note is required when --status is executed or failed")
+    else:
+        status_note = args.status_note
     try:
         metadata = build_metadata(
             run_plan_path=args.run_plan,
@@ -221,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
             local_root=args.local_root,
             started_at=args.started_at,
             ended_at=args.ended_at,
-            status_note=args.status_note,
+            status_note=status_note,
         )
         write_metadata(Path(metadata["adapter"]["metadata_path"]), metadata)
     except (OSError, ValueError, AdapterMetadataValidationError) as exc:
