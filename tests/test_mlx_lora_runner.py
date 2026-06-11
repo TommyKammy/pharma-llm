@@ -80,6 +80,8 @@ def test_build_plan_validates_config_and_planned_command(tmp_path: Path) -> None
 
     assert plan.run_id == "phase6-test-lora"
     assert plan.rank == 16
+    assert len(plan.to_mapping()["config_sha256"]) == 64
+    assert len(plan.to_mapping()["dataset_sha256"]) == 64
     assert plan.target_modules == ("self_attn.q_proj", "self_attn.v_proj")
     assert plan.adapter_path == (local_root / "adapters" / "phase6-test").resolve()
     command = plan.command()
@@ -145,7 +147,7 @@ def test_build_plan_rejects_bool_float_field(tmp_path: Path) -> None:
     )
     config_path.write_text(text, encoding="utf-8")
 
-    with pytest.raises(ValueError, match="training.learning_rate must be a positive number"):
+    with pytest.raises(ValueError, match="training.learning_rate must be a finite positive number"):
         build_plan(config_path=config_path, local_root=local_root)
 
 
@@ -168,6 +170,22 @@ def test_build_plan_accepts_mlx_numeric_sentinels(tmp_path: Path) -> None:
     assert plan.scale == 20.0
     assert plan.num_layers == -1
     assert plan.seed == 0
+
+
+def test_build_plan_rejects_nonfinite_float_field(tmp_path: Path) -> None:
+    local_root = tmp_path / "local"
+    dataset_path = tmp_path / "sft_v0_1.jsonl"
+    config_path = tmp_path / "lora.toml"
+    write_dataset(dataset_path)
+    write_config(
+        config_path,
+        dataset_path=dataset_path,
+        local_root=local_root,
+        scale="nan",
+    )
+
+    with pytest.raises(ValueError, match="training.scale must be a finite positive number"):
+        build_plan(config_path=config_path, local_root=local_root)
 
 
 def test_build_plan_rejects_unqualified_target_modules(tmp_path: Path) -> None:

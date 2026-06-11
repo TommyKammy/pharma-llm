@@ -94,6 +94,55 @@ MLX-compatible numeric settings are preserved, including fractional
 Real MLX LoRA execution is intentionally deferred to P6-004 after this command
 contract is reviewed.
 
+## Phase 6 Qwen LoRA Execution Metadata
+
+P6-004 records small adapter metadata without committing adapter weights,
+checkpoints, or raw logs. Use the dry-run plan first, then execute the generated
+MLX command locally after confirming model weights and the approved SFT dataset
+are present.
+
+Operator checklist:
+
+1. Run the P6-003 dry run and inspect `run_plan.json`,
+   `mlx_lora_config.yaml`, and `mlx_data/train.jsonl`.
+2. Confirm the Qwen model path and approved SFT dataset version are correct.
+3. Execute the planned command locally:
+
+```bash
+mlx_lm.lora \
+  --config /Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/mlx_lora_config.yaml
+```
+
+4. Keep adapter files under `/Users/tsinfra/Dev/pharma-llm/local/adapters`.
+5. Record metadata after the run:
+
+```bash
+uv run python scripts/record_lora_adapter_metadata.py \
+  --run-plan /Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/run_plan.json \
+  --output /Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/adapter_metadata.json \
+  --status executed \
+  --started-at 2026-06-10T01:00:00Z \
+  --ended-at 2026-06-10T03:00:00Z \
+  --status-note "Local Qwen SFT LoRA v1 completed; adapter directory exists."
+```
+
+If training cannot be executed yet, record a `planned` placeholder instead of
+pretending the adapter exists. The metadata validator rejects `executed` records
+that still look like dry-run placeholders or point outside the local artifact
+root.
+
+Re-run behavior:
+
+- Re-run `scripts/run_mlx_lora.py --dry-run` after changing config or dataset.
+- Re-record adapter metadata after every completed training attempt.
+- Use the metadata `config.source_sha256`, `config.generated_sha256`, and
+  `dataset.training_input.sha256` fields to identify which config and
+  materialized MLX input produced an adapter. Treat `dataset.sha256` as the
+  source SFT JSONL digest, not as proof of the exact training split when local
+  inputs may have been regenerated.
+- Do not commit local `adapter_metadata.json`; it lives beside the local run
+  plan and adapter artifacts for operator audit.
+
 ## Initial Smoke Tests
 
 Phase 1 should start with a small model before any 27B-class experiment.

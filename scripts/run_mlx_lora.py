@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import math
 import re
 import tomllib
 from dataclasses import dataclass
@@ -27,6 +29,8 @@ RUN_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,79}$")
 class MlxLoraTrainingPlan:
     run_id: str
     config_path: Path
+    config_sha256: str
+    dataset_sha256: str
     local_root: Path
     model_path: Path
     dataset_path: Path
@@ -35,7 +39,7 @@ class MlxLoraTrainingPlan:
     mlx_data_dir: Path
     mlx_config_path: Path
     rank: int
-    scale: int
+    scale: float
     dropout: float
     mask_prompt: bool
     target_modules: tuple[str, ...]
@@ -88,6 +92,8 @@ class MlxLoraTrainingPlan:
         return {
             "run_id": self.run_id,
             "config_path": str(self.config_path),
+            "config_sha256": self.config_sha256,
+            "dataset_sha256": self.dataset_sha256,
             "local_root": str(self.local_root),
             "model_path": str(self.model_path),
             "dataset_path": str(self.dataset_path),
@@ -170,15 +176,15 @@ def require_int_at_least(
 
 def require_positive_float(section: dict[str, Any], key: str, *, section_name: str) -> float:
     value = section.get(key)
-    if type(value) not in (int, float) or value <= 0:
-        raise ValueError(f"{section_name}.{key} must be a positive number")
+    if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+        raise ValueError(f"{section_name}.{key} must be a finite positive number")
     return float(value)
 
 
 def require_non_negative_float(section: dict[str, Any], key: str, *, section_name: str) -> float:
     value = section.get(key)
-    if type(value) not in (int, float) or value < 0:
-        raise ValueError(f"{section_name}.{key} must be a non-negative number")
+    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+        raise ValueError(f"{section_name}.{key} must be a finite non-negative number")
     return float(value)
 
 
@@ -220,6 +226,14 @@ def require_under_root(path: Path, root: Path, field_name: str) -> Path:
 def load_config(path: Path) -> dict[str, Any]:
     with path.open("rb") as handle:
         return tomllib.load(handle)
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def mlx_split_paths(mlx_data_dir: Path) -> tuple[Path, ...]:
@@ -325,6 +339,8 @@ def build_plan(
     return MlxLoraTrainingPlan(
         run_id=run_id,
         config_path=resolved_config,
+        config_sha256=file_sha256(resolved_config),
+        dataset_sha256=file_sha256(dataset_path),
         local_root=local_root.expanduser().resolve(),
         model_path=model_path,
         dataset_path=dataset_path,
