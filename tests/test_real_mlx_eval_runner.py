@@ -209,6 +209,7 @@ def test_mlx_lm_cli_client_invokes_generator_command(tmp_path: Path) -> None:
     assert response.timing.prompt_tokens is None
     assert response.timing.completion_tokens is None
     assert response.timing.tokens_per_second is None
+    assert response.finish_reason == "unknown"
     assert response.timing.total_latency_ms >= 0
 
 
@@ -258,6 +259,7 @@ def test_mlx_lm_python_client_loads_once_and_counts_tokenizer_tokens(tmp_path: P
     assert first.timing.prompt_tokens == 5
     assert first.timing.completion_tokens == 4
     assert first.timing.tokens_per_second is not None
+    assert first.finish_reason == "length"
     assert second.timing.prompt_tokens == 4
 
 

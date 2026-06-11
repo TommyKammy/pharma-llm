@@ -72,6 +72,17 @@ def tokenizer_token_count(tokenizer: Any, text: str) -> int | None:
     return len(tokens)
 
 
+def finish_reason_from_completion_tokens(
+    completion_tokens: int | None,
+    max_tokens: int,
+) -> str:
+    if completion_tokens is None:
+        return "unknown"
+    if completion_tokens >= max_tokens:
+        return "length"
+    return "stop"
+
+
 @dataclass(frozen=True)
 class MlxLmPythonClient:
     """Persistent real local MLX LM client backed by the Python API."""
@@ -142,7 +153,10 @@ class MlxLmPythonClient:
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
             ),
-            finish_reason="stop",
+            finish_reason=finish_reason_from_completion_tokens(
+                completion_tokens,
+                request.max_tokens,
+            ),
         )
 
 
@@ -214,5 +228,5 @@ class MlxLmCliClient:
                 prompt_tokens=None,
                 completion_tokens=None,
             ),
-            finish_reason="stop",
+            finish_reason="unknown",
         )
