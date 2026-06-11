@@ -84,8 +84,10 @@ class BaselineResult:
         if not isinstance(scoring_status, str) or not scoring_status.strip():
             raise BaselineResultError("scoring_status must be a non-empty string")
         adapter_id = model.get("adapter_id")
-        if adapter_id is not None and not isinstance(adapter_id, str):
-            raise BaselineResultError("adapter_id must be null or a string")
+        if adapter_id is not None and (
+            not isinstance(adapter_id, str) or not adapter_id.strip()
+        ):
+            raise BaselineResultError("adapter_id must be null or a non-empty string")
 
         return cls(
             run_id=require_string(mapping, "run_id"),

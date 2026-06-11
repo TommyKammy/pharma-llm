@@ -6,6 +6,12 @@ from pharma_llm_lab.baseline.reports import (
     load_report_inputs,
     write_baseline_report,
 )
+from pharma_llm_lab.baseline.lora_comparison import (
+    LoraComparisonInput,
+    build_lora_comparison_report,
+    load_lora_comparison_inputs,
+    write_lora_comparison_report,
+)
 from pharma_llm_lab.baseline.results import (
     BaselineResult,
     BaselineResultError,
@@ -23,11 +29,15 @@ __all__ = [
     "BaselineResultError",
     "BaselineSummary",
     "CategoryMetrics",
+    "LoraComparisonInput",
     "aggregate_results",
     "build_baseline_report",
+    "build_lora_comparison_report",
     "load_baseline_results",
+    "load_lora_comparison_inputs",
     "load_report_inputs",
     "write_baseline_report",
     "write_category_metrics_csv",
+    "write_lora_comparison_report",
     "write_summary_json",
 ]

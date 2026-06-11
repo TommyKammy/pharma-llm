@@ -111,6 +111,10 @@ def test_baseline_results_accept_empty_generated_text(tmp_path: Path) -> None:
             lambda record: record["timing"].update({"ttft_ms": True}),
             "timing.ttft_ms must be a finite non-negative number",
         ),
+        (
+            lambda record: record["model"].update({"adapter_id": "   "}),
+            "adapter_id must be null or a non-empty string",
+        ),
     ],
 )
 def test_baseline_results_reject_invalid_prediction_records(
