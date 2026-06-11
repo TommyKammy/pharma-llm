@@ -195,6 +195,20 @@ uv run python scripts/generate_lora_comparison_report.py \
   --output results/reports/lora_comparison_report.md
 ```
 
+Before using the artifacts for the comparison report or safety review, validate
+the host-local artifact set:
+
+```bash
+uv run --extra dev python scripts/validate_real_eval_artifacts.py
+```
+
+The validator checks that the local Qwen model path, LoRA run plan, adapter
+metadata, adapter marker files, generated MLX config, materialized train split,
+base predictions, base summary/category metrics, and LoRA predictions are
+present and mutually compatible. It also confirms that the base and LoRA
+prediction JSONL files cover the same Phase 4 eval ID/category mapping without
+committing any raw outputs.
+
 The report rejects mismatched eval ID sets, requires base predictions to have no
 adapter ID, requires LoRA predictions to include an adapter ID, requires the
 same provider before computing deltas, and surfaces safety/style notes even when
