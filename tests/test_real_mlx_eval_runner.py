@@ -11,6 +11,7 @@ from pharma_llm_lab.inference import (
     InferenceTiming,
     ModelIdentity,
     MlxLmCliClient,
+    MlxLmPythonClient,
 )
 from pharma_llm_lab.training.lora_metadata import METADATA_VERSION
 from scripts.run_real_mlx_eval import load_adapter_metadata, run_real_mlx_eval
@@ -36,6 +37,11 @@ class FakeRealMlxClient:
             ),
             finish_reason="stop",
         )
+
+
+class FakeTokenizer:
+    def encode(self, text: str) -> list[int]:
+        return [ord(char) for char in text]
 
 
 def write_adapter_metadata(path: Path, *, local_root: Path, status: str = "executed") -> Path:
@@ -197,7 +203,62 @@ def test_mlx_lm_cli_client_invokes_generator_command(tmp_path: Path) -> None:
 
     assert response.generated_text == "generated:abcdef"
     assert response.model.adapter_id is None
+    assert "--verbose" in client.build_command(
+        InferenceRequest(request_id="request-2", prompt="prompt", max_tokens=4)
+    )
+    assert response.timing.prompt_tokens is None
+    assert response.timing.completion_tokens is None
+    assert response.timing.tokens_per_second is None
     assert response.timing.total_latency_ms >= 0
+
+
+def test_mlx_lm_python_client_loads_once_and_counts_tokenizer_tokens(tmp_path: Path) -> None:
+    model_path = tmp_path / "model"
+    adapter_path = tmp_path / "adapter"
+    model_path.mkdir()
+    adapter_path.mkdir()
+    load_calls: list[dict[str, str]] = []
+    generate_calls: list[dict[str, object]] = []
+
+    def fake_load(**kwargs: str) -> tuple[str, FakeTokenizer]:
+        load_calls.append(kwargs)
+        return "loaded-model", FakeTokenizer()
+
+    def fake_generate(**kwargs: object) -> str:
+        generate_calls.append(kwargs)
+        return "生成結果"
+
+    client = MlxLmPythonClient(
+        model=ModelIdentity(
+            model_id="qwen/qwen3.6-27b-base",
+            provider="mlx",
+            adapter_id="qwen_sft_lora_r16_v1",
+        ),
+        model_path=model_path,
+        adapter_path=adapter_path,
+        load_fn=fake_load,
+        generate_fn=fake_generate,
+    )
+
+    first = client.generate(
+        InferenceRequest(request_id="request-1", prompt="安全性確認", max_tokens=4)
+    )
+    second = client.generate(
+        InferenceRequest(request_id="request-2", prompt="業務文体", max_tokens=4)
+    )
+
+    assert len(load_calls) == 1
+    assert load_calls[0] == {
+        "path_or_hf_repo": str(model_path.resolve()),
+        "adapter_path": str(adapter_path.resolve()),
+    }
+    assert len(generate_calls) == 2
+    assert generate_calls[0]["verbose"] is False
+    assert first.generated_text == "生成結果"
+    assert first.timing.prompt_tokens == 5
+    assert first.timing.completion_tokens == 4
+    assert first.timing.tokens_per_second is not None
+    assert second.timing.prompt_tokens == 4
 
 
 def test_real_eval_cli_writes_base_predictions_with_fake_generator(tmp_path: Path) -> None:
@@ -219,6 +280,8 @@ def test_real_eval_cli_writes_base_predictions_with_fake_generator(tmp_path: Pat
             str(model_path),
             "--max-tokens",
             "4",
+            "--client-backend",
+            "cli",
             "--generator-command",
             (
                 f"{sys.executable} -c "

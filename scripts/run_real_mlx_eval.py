@@ -14,7 +14,12 @@ if str(REPO_ROOT) not in sys.path:
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from pharma_llm_lab.inference import MlxInferenceClient, MlxLmCliClient, ModelIdentity  # noqa: E402
+from pharma_llm_lab.inference import (  # noqa: E402
+    MlxInferenceClient,
+    MlxLmCliClient,
+    MlxLmPythonClient,
+    ModelIdentity,
+)
 from pharma_llm_lab.training import validate_adapter_metadata  # noqa: E402
 from scripts.run_baseline_eval import (  # noqa: E402
     BaselinePrediction,
@@ -111,35 +116,46 @@ def run_real_mlx_eval(
     return tuple(predictions)
 
 
-def build_base_client(args: argparse.Namespace) -> MlxLmCliClient:
+def build_base_client(args: argparse.Namespace) -> MlxInferenceClient:
     if args.model_path is None:
         raise ValueError("--model-path is required for base real eval")
-    return MlxLmCliClient(
-        model=ModelIdentity(
-            model_id=args.model_id,
-            provider=DEFAULT_PROVIDER,
-            adapter_id=None,
-        ),
-        model_path=args.model_path,
-        adapter_path=None,
-        command=tuple(shlex.split(args.generator_command)),
-        timeout_seconds=args.timeout_seconds,
+    model = ModelIdentity(
+        model_id=args.model_id,
+        provider=DEFAULT_PROVIDER,
+        adapter_id=None,
     )
+    if args.client_backend == "cli":
+        return MlxLmCliClient(
+            model=model,
+            model_path=args.model_path,
+            adapter_path=None,
+            command=tuple(shlex.split(args.generator_command)),
+            timeout_seconds=args.timeout_seconds,
+        )
+    return MlxLmPythonClient(model=model, model_path=args.model_path, adapter_path=None)
 
 
-def build_lora_client(args: argparse.Namespace) -> MlxLmCliClient:
+def build_lora_client(args: argparse.Namespace) -> MlxInferenceClient:
     if args.adapter_metadata is None:
         raise ValueError("--adapter-metadata is required for LoRA real eval")
     metadata = load_adapter_metadata(args.adapter_metadata)
     model_path = metadata_model_path(metadata)
     if args.model_path is not None and args.model_path.expanduser().resolve() != model_path:
         raise ValueError("--model-path must match adapter metadata model.path")
-    return MlxLmCliClient(
-        model=metadata_model_identity(metadata),
+    model = metadata_model_identity(metadata)
+    adapter_path = metadata_adapter_path(metadata)
+    if args.client_backend == "cli":
+        return MlxLmCliClient(
+            model=model,
+            model_path=model_path,
+            adapter_path=adapter_path,
+            command=tuple(shlex.split(args.generator_command)),
+            timeout_seconds=args.timeout_seconds,
+        )
+    return MlxLmPythonClient(
+        model=model,
         model_path=model_path,
-        adapter_path=metadata_adapter_path(metadata),
-        command=tuple(shlex.split(args.generator_command)),
-        timeout_seconds=args.timeout_seconds,
+        adapter_path=adapter_path,
     )
 
 
@@ -156,11 +172,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-tokens", type=int, default=128)
     parser.add_argument("--timeout-seconds", type=int, default=1800)
     parser.add_argument(
+        "--client-backend",
+        choices=("python", "cli"),
+        default="python",
+        help=(
+            "Use the persistent MLX Python API by default. The CLI backend is a "
+            "fallback and disables token-count metrics because CLI stdout does not "
+            "expose reliable tokenizer metadata."
+        ),
+    )
+    parser.add_argument(
         "--generator-command",
         default="mlx_lm.generate",
         help=(
-            "Command used before fixed MLX generate flags. Quote multi-token commands, "
-            "for example: --generator-command 'python -m mlx_lm.generate'."
+            "CLI backend command used before fixed MLX generate flags. Quote "
+            "multi-token commands, for example: --generator-command "
+            "'python -m mlx_lm.generate'."
         ),
     )
     return parser
