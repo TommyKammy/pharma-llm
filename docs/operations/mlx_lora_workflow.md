@@ -143,6 +143,47 @@ Re-run behavior:
 - Do not commit local `adapter_metadata.json`; it lives beside the local run
   plan and adapter artifacts for operator audit.
 
+## Phase 6 Base vs LoRA Evaluation Report
+
+P6-005 compares the Qwen base prediction JSONL and the Qwen SFT LoRA v1
+prediction JSONL over the same Phase 4 eval IDs. CI can exercise the wiring with
+mock predictions:
+
+```bash
+uv run python scripts/run_baseline_eval.py \
+  --output results/baseline/qwen_base_predictions.jsonl \
+  --model-label qwen-base \
+  --run-id phase6-base-mock
+
+uv run python scripts/run_lora_eval.py \
+  --output results/lora/qwen_sft_lora_v1_predictions.jsonl \
+  --adapter-id qwen_sft_lora_r16_v1 \
+  --run-id phase6-lora-mock
+```
+
+For a reviewed local adapter, generate the LoRA prediction JSONL with the
+recorded adapter metadata so the model and adapter identity stay aligned:
+
+```bash
+uv run python scripts/run_lora_eval.py \
+  --adapter-metadata /Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/adapter_metadata.json \
+  --output /Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/lora_predictions.jsonl
+```
+
+Then produce the Markdown comparison report:
+
+```bash
+uv run python scripts/generate_lora_comparison_report.py \
+  --base-input results/baseline/qwen_base_predictions.jsonl \
+  --lora-input results/lora/qwen_sft_lora_v1_predictions.jsonl \
+  --adapter-metadata /Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/adapter_metadata.json \
+  --output results/reports/lora_comparison_report.md
+```
+
+The report rejects mismatched eval ID sets, requires base predictions to have no
+adapter ID, requires LoRA predictions to include an adapter ID, and surfaces
+safety/style notes even when scoring remains manual-review-only.
+
 ## Initial Smoke Tests
 
 Phase 1 should start with a small model before any 27B-class experiment.
