@@ -88,6 +88,9 @@ def validate_base_lora_pair(
     metadata_model_id = adapter_metadata["model"]["id"]
     if lora.summary.model_id != metadata_model_id:
         raise BaselineResultError("LoRA model_id must match adapter metadata model.id")
+    metadata_provider = adapter_metadata["model"]["provider"]
+    if lora.summary.provider != metadata_provider:
+        raise BaselineResultError("LoRA provider must match adapter metadata model.provider")
 
 
 def load_lora_comparison_inputs(

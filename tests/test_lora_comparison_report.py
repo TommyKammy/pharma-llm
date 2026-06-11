@@ -24,6 +24,7 @@ from scripts.run_lora_eval import (
     DEFAULT_OUTPUT as DEFAULT_LORA_OUTPUT,
     run_mock_lora_eval,
 )
+from pharma_llm_lab.training.lora_metadata import METADATA_VERSION
 
 SEED_PATH = Path("evals/prompts/phase4_seed.jsonl")
 
@@ -85,6 +86,71 @@ def prediction_record(**updates: object) -> dict[str, object]:
     return record
 
 
+def write_adapter_metadata(path: Path, *, local_root: Path, provider: str = "mock-mlx") -> Path:
+    payload = {
+        "metadata_version": METADATA_VERSION,
+        "run_id": DEFAULT_ADAPTER_ID,
+        "status": "executed",
+        "model": {
+            "id": "qwen/qwen3.6-27b-base",
+            "provider": provider,
+            "path": str((local_root / "models" / "qwen").resolve()),
+        },
+        "dataset": {
+            "version": "sft-v0.1",
+            "path": str((local_root / "data" / "sft.jsonl").resolve()),
+            "sha256": "a" * 64,
+            "training_input": {
+                "path": str((local_root / "runs" / "mlx_data" / "train.jsonl").resolve()),
+                "sha256": "b" * 64,
+            },
+        },
+        "config": {
+            "source_path": str((local_root / "configs" / "qwen.toml").resolve()),
+            "source_sha256": "c" * 64,
+            "generated_path": str((local_root / "runs" / "mlx_lora_config.yaml").resolve()),
+            "generated_sha256": "d" * 64,
+        },
+        "adapter": {
+            "path": str((local_root / "adapters" / DEFAULT_ADAPTER_ID).resolve()),
+            "exists": True,
+            "is_directory": True,
+            "marker_files": ["adapter_config.json", "adapters.safetensors"],
+            "metadata_path": str(path.resolve()),
+        },
+        "training": {
+            "rank": 16,
+            "scale": 32.0,
+            "dropout": 0.0,
+            "mask_prompt": True,
+            "target_modules": ["self_attn.q_proj", "self_attn.v_proj"],
+            "epochs": None,
+            "max_seq_length": 128,
+            "iters": 2,
+            "batch_size": 1,
+            "learning_rate": 0.00001,
+            "num_layers": -1,
+            "seed": 0,
+        },
+        "timestamps": {
+            "created_at": "2026-06-10T00:00:00Z",
+            "started_at": "2026-06-10T01:00:00Z",
+            "ended_at": "2026-06-10T03:00:00Z",
+        },
+        "validation": {
+            "is_dry_run_placeholder": False,
+            "status_note": "Local training completed.",
+        },
+        "local_artifact_policy": {
+            "local_root": str(local_root.resolve()),
+            "large_artifacts_ignored": True,
+        },
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+    return path
+
+
 def test_lora_comparison_defaults_align_with_generated_prediction_paths() -> None:
     assert DEFAULT_BASE_INPUT == DEFAULT_BASE_OUTPUT
     assert DEFAULT_LORA_INPUT == DEFAULT_LORA_OUTPUT
@@ -141,6 +207,37 @@ def test_lora_comparison_rejects_base_adapter_identity(tmp_path: Path) -> None:
         load_lora_comparison_inputs(base_path=base_path, lora_path=lora_path)
 
 
+def test_lora_comparison_rejects_blank_lora_adapter_identity(tmp_path: Path) -> None:
+    base_path = write_jsonl(
+        tmp_path / "base.jsonl",
+        [
+            prediction_record(
+                run_id="base-fixture",
+                model={
+                    "model_id": "qwen/qwen3.6-27b-base",
+                    "provider": "mock-mlx",
+                    "adapter_id": None,
+                },
+            )
+        ],
+    )
+    lora_path = write_jsonl(
+        tmp_path / "lora-blank-adapter.jsonl",
+        [
+            prediction_record(
+                model={
+                    "model_id": "qwen/qwen3.6-27b-base",
+                    "provider": "mock-mlx",
+                    "adapter_id": "   ",
+                },
+            )
+        ],
+    )
+
+    with pytest.raises(BaselineResultError, match="adapter_id must be null or a non-empty"):
+        load_lora_comparison_inputs(base_path=base_path, lora_path=lora_path)
+
+
 def test_lora_comparison_rejects_provider_mismatch(tmp_path: Path) -> None:
     base_path = write_jsonl(
         tmp_path / "base-mlx.jsonl",
@@ -159,6 +256,24 @@ def test_lora_comparison_rejects_provider_mismatch(tmp_path: Path) -> None:
 
     with pytest.raises(BaselineResultError, match="same provider"):
         load_lora_comparison_inputs(base_path=base_path, lora_path=lora_path)
+
+
+def test_lora_comparison_rejects_metadata_provider_mismatch(tmp_path: Path) -> None:
+    base_path = write_mock_base_predictions(tmp_path / "base.jsonl")
+    lora_path = write_mock_lora_predictions(tmp_path / "lora.jsonl")
+    local_root = tmp_path / "local"
+    metadata_path = write_adapter_metadata(
+        local_root / "runs" / "adapter_metadata.json",
+        local_root=local_root,
+        provider="mlx",
+    )
+
+    with pytest.raises(BaselineResultError, match="adapter metadata model.provider"):
+        load_lora_comparison_inputs(
+            base_path=base_path,
+            lora_path=lora_path,
+            adapter_metadata_path=metadata_path,
+        )
 
 
 def test_lora_comparison_rejects_missing_adapter_metadata_path(tmp_path: Path) -> None:
