@@ -153,19 +153,21 @@ def finish_reason_from_generated_tokens(
     return "stop"
 
 
+def is_numeric_metric_line(lowered: str, prefix: str) -> bool:
+    if not lowered.startswith(prefix):
+        return False
+    value = lowered.removeprefix(prefix).strip()
+    return bool(value) and value[0].isdigit()
+
+
 def strip_mlx_cli_diagnostics(stdout: str) -> str:
-    diagnostic_prefixes = (
-        "========",
-        "--------",
+    numeric_metric_prefixes = (
         "prompt:",
         "generation:",
         "peak memory:",
         "prompt tokens:",
         "generation tokens:",
         "tokens per second:",
-        "wired memory",
-        "warning:",
-        "[warning]",
     )
     empty_generation_lines = {"no text generated for this prompt"}
     response_lines: list[str] = []
@@ -174,9 +176,13 @@ def strip_mlx_cli_diagnostics(stdout: str) -> str:
         lowered = stripped.lower()
         if not stripped:
             continue
+        if all(char == "=" for char in stripped) or all(char == "-" for char in stripped):
+            continue
         if lowered in empty_generation_lines:
             continue
-        if any(lowered.startswith(prefix) for prefix in diagnostic_prefixes):
+        if lowered.startswith("wired memory"):
+            continue
+        if any(is_numeric_metric_line(lowered, prefix) for prefix in numeric_metric_prefixes):
             continue
         response_lines.append(line)
     if len(response_lines) == 1 and response_lines[0].strip().lower() == "none":

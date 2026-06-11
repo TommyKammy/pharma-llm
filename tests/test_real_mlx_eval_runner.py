@@ -339,6 +339,8 @@ def test_mlx_lm_cli_client_strips_known_diagnostics(tmp_path: Path) -> None:
             (
                 "print('Wired memory warning: pressure high'); "
                 "print('========'); "
+                "print('Prompt: 3 tokens, 10.000 tokens-per-sec'); "
+                "print('Generation: 2 tokens, 20.000 tokens-per-sec'); "
                 "print('生成結果')"
             ),
         ),
@@ -349,6 +351,34 @@ def test_mlx_lm_cli_client_strips_known_diagnostics(tmp_path: Path) -> None:
     )
 
     assert response.generated_text == "生成結果"
+
+
+def test_mlx_lm_cli_client_preserves_warning_prefixed_text(tmp_path: Path) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    client = MlxLmCliClient(
+        model=ModelIdentity(model_id="qwen/qwen3.6-27b-base", provider="mlx"),
+        model_path=model_path,
+        command=(
+            sys.executable,
+            "-c",
+            (
+                "print('Warning: 添付文書を確認してください'); "
+                "print('Prompt: 安全性情報の要約'); "
+                "print('Generation: 注意喚起文')"
+            ),
+        ),
+    )
+
+    response = client.generate(
+        InferenceRequest(request_id="request-1", prompt="prompt", max_tokens=4)
+    )
+
+    assert response.generated_text == (
+        "Warning: 添付文書を確認してください\n"
+        "Prompt: 安全性情報の要約\n"
+        "Generation: 注意喚起文"
+    )
 
 
 def test_mlx_lm_cli_client_preserves_empty_generation(tmp_path: Path) -> None:
