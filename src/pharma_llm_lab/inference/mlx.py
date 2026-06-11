@@ -109,6 +109,18 @@ def stream_response_token_count(response: Any) -> int | None:
     return 1
 
 
+def stream_response_prompt_token_count(response: Any) -> int | None:
+    prompt_tokens = getattr(response, "prompt_tokens", None)
+    if prompt_tokens is None:
+        return None
+    if hasattr(prompt_tokens, "item"):
+        prompt_tokens = prompt_tokens.item()
+    try:
+        return int(prompt_tokens)
+    except (TypeError, ValueError):
+        return None
+
+
 def normalize_finish_reason(value: Any) -> str | None:
     if value is None:
         return None
@@ -222,6 +234,7 @@ class MlxLmPythonClient:
         start = perf_counter()
         generated_text = ""
         generated_token_count: int | None = None
+        prompt_tokens: int | None = None
         finish_reason: str | None = None
         sampler = self._make_sampler_fn(temp=float(request.temperature))
         for response in self._stream_generate_fn(
@@ -230,9 +243,11 @@ class MlxLmPythonClient:
             prompt=request.prompt,
             max_tokens=request.max_tokens,
             sampler=sampler,
-            verbose=False,
         ):
             generated_text += stream_response_text(response)
+            response_prompt_tokens = stream_response_prompt_token_count(response)
+            if response_prompt_tokens is not None:
+                prompt_tokens = response_prompt_tokens
             token_count = stream_response_token_count(response)
             if token_count is not None:
                 generated_token_count = (generated_token_count or 0) + token_count
@@ -240,7 +255,8 @@ class MlxLmPythonClient:
             if response_finish_reason is not None:
                 finish_reason = response_finish_reason
         total_latency_ms = round((perf_counter() - start) * 1000, 3)
-        prompt_tokens = tokenizer_token_count(self._tokenizer, request.prompt)
+        if prompt_tokens is None:
+            prompt_tokens = tokenizer_token_count(self._tokenizer, request.prompt)
         completion_tokens = generated_token_count
         tokens_per_second = None
         if completion_tokens is not None and total_latency_ms > 0:

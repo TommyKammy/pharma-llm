@@ -55,6 +55,7 @@ class FakeTokenizer:
 class FakeStreamResponse:
     text: str | None
     token: int | None = None
+    prompt_tokens: int | None = None
     finish_reason: str | None = None
 
 
@@ -244,8 +245,9 @@ def test_mlx_lm_python_client_loads_once_and_counts_tokenizer_tokens(tmp_path: P
 
     def fake_stream_generate(**kwargs: object) -> list[FakeStreamResponse]:
         stream_calls.append(kwargs)
+        prompt_tokens = 6 if kwargs["prompt"] == "安全性確認" else None
         return [
-            FakeStreamResponse("生成", token=101),
+            FakeStreamResponse("生成", token=101, prompt_tokens=prompt_tokens),
             FakeStreamResponse("結果", token=102, finish_reason="max_tokens"),
         ]
 
@@ -285,11 +287,11 @@ def test_mlx_lm_python_client_loads_once_and_counts_tokenizer_tokens(tmp_path: P
     }
     assert len(stream_calls) == 2
     assert sampler_calls == [{"temp": 0.2}, {"temp": 0.0}]
-    assert stream_calls[0]["verbose"] is False
     assert stream_calls[0]["sampler"] is sampler
     assert "temp" not in stream_calls[0]
+    assert "verbose" not in stream_calls[0]
     assert first.generated_text == "生成結果"
-    assert first.timing.prompt_tokens == 5
+    assert first.timing.prompt_tokens == 6
     assert first.timing.completion_tokens == 2
     assert first.timing.tokens_per_second is not None
     assert first.finish_reason == "length"
