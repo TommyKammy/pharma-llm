@@ -16,8 +16,8 @@ from pharma_llm_lab.baseline import (  # noqa: E402
     write_lora_comparison_report,
 )
 
-DEFAULT_BASE_INPUT = Path("results/baseline/qwen_base_predictions.jsonl")
-DEFAULT_LORA_INPUT = Path("results/lora/qwen_sft_lora_v1_predictions.jsonl")
+DEFAULT_BASE_INPUT = Path("results/baseline/mock_predictions.jsonl")
+DEFAULT_LORA_INPUT = Path("results/lora/mock_qwen_sft_lora_v1_predictions.jsonl")
 DEFAULT_OUTPUT = Path("results/reports/lora_comparison_report.md")
 
 

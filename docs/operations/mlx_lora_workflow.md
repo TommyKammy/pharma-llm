@@ -175,7 +175,7 @@ Then produce the Markdown comparison report:
 ```bash
 uv run python scripts/generate_lora_comparison_report.py \
   --base-input results/baseline/qwen_base_predictions.jsonl \
-  --lora-input results/lora/qwen_sft_lora_v1_predictions.jsonl \
+  --lora-input /Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/lora_predictions.jsonl \
   --adapter-metadata /Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/adapter_metadata.json \
   --output results/reports/lora_comparison_report.md
 ```

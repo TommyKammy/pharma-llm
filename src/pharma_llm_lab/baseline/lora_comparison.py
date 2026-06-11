@@ -11,12 +11,12 @@ from pharma_llm_lab.baseline.reports import (
     BaselineReportInput,
     format_optional_float,
     format_status_counts,
+    load_report_inputs,
     markdown_row,
     mean,
     notable_failure_modes,
 )
 from pharma_llm_lab.baseline.results import BaselineResult, BaselineResultError
-from pharma_llm_lab.baseline.reports import load_report_inputs
 from pharma_llm_lab.dataset import EvaluationCategory
 from pharma_llm_lab.training.lora_metadata import (
     AdapterMetadataValidationError,
@@ -38,8 +38,12 @@ class LoraComparisonInput:
 
 
 def load_adapter_metadata(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        raise BaselineResultError(f"{path}: adapter metadata path is not a file")
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise BaselineResultError(f"{path}: could not read adapter metadata: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise BaselineResultError(f"{path}: malformed adapter metadata JSON: {exc.msg}") from exc
     if not isinstance(payload, dict):
@@ -68,6 +72,8 @@ def validate_base_lora_pair(
         raise BaselineResultError("LoRA predictions must include adapter_id")
     if base.summary.model_id != lora.summary.model_id:
         raise BaselineResultError("base and LoRA predictions must use the same model_id")
+    if base.summary.provider != lora.summary.provider:
+        raise BaselineResultError("base and LoRA predictions must use the same provider")
 
     base_categories = eval_category_map(base.results)
     lora_categories = eval_category_map(lora.results)

@@ -10,8 +10,20 @@ from pharma_llm_lab.baseline import (
     build_lora_comparison_report,
     load_lora_comparison_inputs,
 )
-from scripts.run_baseline_eval import run_mock_baseline, write_predictions
-from scripts.run_lora_eval import DEFAULT_ADAPTER_ID, run_mock_lora_eval
+from scripts.generate_lora_comparison_report import (
+    DEFAULT_BASE_INPUT,
+    DEFAULT_LORA_INPUT,
+)
+from scripts.run_baseline_eval import (
+    DEFAULT_OUTPUT as DEFAULT_BASE_OUTPUT,
+    run_mock_baseline,
+    write_predictions,
+)
+from scripts.run_lora_eval import (
+    DEFAULT_ADAPTER_ID,
+    DEFAULT_OUTPUT as DEFAULT_LORA_OUTPUT,
+    run_mock_lora_eval,
+)
 
 SEED_PATH = Path("evals/prompts/phase4_seed.jsonl")
 
@@ -73,6 +85,11 @@ def prediction_record(**updates: object) -> dict[str, object]:
     return record
 
 
+def test_lora_comparison_defaults_align_with_generated_prediction_paths() -> None:
+    assert DEFAULT_BASE_INPUT == DEFAULT_BASE_OUTPUT
+    assert DEFAULT_LORA_INPUT == DEFAULT_LORA_OUTPUT
+
+
 def test_lora_comparison_report_generates_markdown(tmp_path: Path) -> None:
     base_path = write_mock_base_predictions(tmp_path / "base.jsonl")
     lora_path = write_mock_lora_predictions(tmp_path / "lora.jsonl")
@@ -122,6 +139,38 @@ def test_lora_comparison_rejects_base_adapter_identity(tmp_path: Path) -> None:
 
     with pytest.raises(BaselineResultError, match="base predictions must not include"):
         load_lora_comparison_inputs(base_path=base_path, lora_path=lora_path)
+
+
+def test_lora_comparison_rejects_provider_mismatch(tmp_path: Path) -> None:
+    base_path = write_jsonl(
+        tmp_path / "base-mlx.jsonl",
+        [
+            prediction_record(
+                run_id="base-fixture",
+                model={
+                    "model_id": "qwen/qwen3.6-27b-base",
+                    "provider": "mlx",
+                    "adapter_id": None,
+                },
+            )
+        ],
+    )
+    lora_path = write_jsonl(tmp_path / "lora-mock.jsonl", [prediction_record()])
+
+    with pytest.raises(BaselineResultError, match="same provider"):
+        load_lora_comparison_inputs(base_path=base_path, lora_path=lora_path)
+
+
+def test_lora_comparison_rejects_missing_adapter_metadata_path(tmp_path: Path) -> None:
+    base_path = write_mock_base_predictions(tmp_path / "base.jsonl")
+    lora_path = write_mock_lora_predictions(tmp_path / "lora.jsonl")
+
+    with pytest.raises(BaselineResultError, match="adapter metadata path is not a file"):
+        load_lora_comparison_inputs(
+            base_path=base_path,
+            lora_path=lora_path,
+            adapter_metadata_path=tmp_path / "missing_adapter_metadata.json",
+        )
 
 
 def test_lora_comparison_cli_writes_markdown(tmp_path: Path) -> None:
