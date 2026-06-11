@@ -64,7 +64,10 @@ def tokenizer_token_count(tokenizer: Any, text: str) -> int | None:
     encode = getattr(tokenizer, "encode", None)
     if not callable(encode):
         return None
-    tokens = encode(text)
+    try:
+        tokens = encode(text, add_special_tokens=False)
+    except TypeError:
+        tokens = encode(text)
     if hasattr(tokens, "tolist"):
         tokens = tokens.tolist()
     if not hasattr(tokens, "__len__"):
@@ -81,6 +84,14 @@ def finish_reason_from_completion_tokens(
     if completion_tokens >= max_tokens:
         return "length"
     return "stop"
+
+
+def normalize_generated_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise InferenceContractError("generated_text must be a string or None")
+    return value
 
 
 @dataclass(frozen=True)
@@ -128,12 +139,15 @@ class MlxLmPythonClient:
 
     def generate(self, request: InferenceRequest) -> InferenceResponse:
         start = perf_counter()
-        generated_text = self._generate_fn(
-            model=self._loaded_model,
-            tokenizer=self._tokenizer,
-            prompt=request.prompt,
-            max_tokens=request.max_tokens,
-            verbose=False,
+        generated_text = normalize_generated_text(
+            self._generate_fn(
+                model=self._loaded_model,
+                tokenizer=self._tokenizer,
+                prompt=request.prompt,
+                max_tokens=request.max_tokens,
+                temp=float(request.temperature),
+                verbose=False,
+            )
         )
         total_latency_ms = round((perf_counter() - start) * 1000, 3)
         prompt_tokens = tokenizer_token_count(self._tokenizer, request.prompt)

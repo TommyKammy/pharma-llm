@@ -40,7 +40,13 @@ class FakeRealMlxClient:
 
 
 class FakeTokenizer:
-    def encode(self, text: str) -> list[int]:
+    def __init__(self) -> None:
+        self.encode_calls: list[dict[str, object]] = []
+
+    def encode(self, text: str, *, add_special_tokens: bool = True) -> list[int]:
+        self.encode_calls.append(
+            {"text": text, "add_special_tokens": add_special_tokens}
+        )
         return [ord(char) for char in text]
 
 
@@ -220,10 +226,11 @@ def test_mlx_lm_python_client_loads_once_and_counts_tokenizer_tokens(tmp_path: P
     adapter_path.mkdir()
     load_calls: list[dict[str, str]] = []
     generate_calls: list[dict[str, object]] = []
+    tokenizer = FakeTokenizer()
 
     def fake_load(**kwargs: str) -> tuple[str, FakeTokenizer]:
         load_calls.append(kwargs)
-        return "loaded-model", FakeTokenizer()
+        return "loaded-model", tokenizer
 
     def fake_generate(**kwargs: object) -> str:
         generate_calls.append(kwargs)
@@ -242,7 +249,12 @@ def test_mlx_lm_python_client_loads_once_and_counts_tokenizer_tokens(tmp_path: P
     )
 
     first = client.generate(
-        InferenceRequest(request_id="request-1", prompt="安全性確認", max_tokens=4)
+        InferenceRequest(
+            request_id="request-1",
+            prompt="安全性確認",
+            max_tokens=4,
+            temperature=0.2,
+        )
     )
     second = client.generate(
         InferenceRequest(request_id="request-2", prompt="業務文体", max_tokens=4)
@@ -255,12 +267,34 @@ def test_mlx_lm_python_client_loads_once_and_counts_tokenizer_tokens(tmp_path: P
     }
     assert len(generate_calls) == 2
     assert generate_calls[0]["verbose"] is False
+    assert generate_calls[0]["temp"] == 0.2
     assert first.generated_text == "生成結果"
     assert first.timing.prompt_tokens == 5
     assert first.timing.completion_tokens == 4
     assert first.timing.tokens_per_second is not None
     assert first.finish_reason == "length"
     assert second.timing.prompt_tokens == 4
+    assert all(call["add_special_tokens"] is False for call in tokenizer.encode_calls)
+
+
+def test_mlx_lm_python_client_preserves_empty_generation(tmp_path: Path) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+
+    client = MlxLmPythonClient(
+        model=ModelIdentity(model_id="qwen/qwen3.6-27b-base", provider="mlx"),
+        model_path=model_path,
+        load_fn=lambda **_kwargs: ("loaded-model", FakeTokenizer()),
+        generate_fn=lambda **_kwargs: None,
+    )
+
+    response = client.generate(
+        InferenceRequest(request_id="request-1", prompt="即時終了", max_tokens=4)
+    )
+
+    assert response.generated_text == ""
+    assert response.timing.completion_tokens == 0
+    assert response.finish_reason == "stop"
 
 
 def test_real_eval_cli_writes_base_predictions_with_fake_generator(tmp_path: Path) -> None:
