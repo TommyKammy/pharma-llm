@@ -234,7 +234,9 @@ def test_mlx_lm_python_client_loads_once_and_counts_tokenizer_tokens(tmp_path: P
     adapter_path.mkdir()
     load_calls: list[dict[str, str]] = []
     stream_calls: list[dict[str, object]] = []
+    sampler_calls: list[dict[str, float]] = []
     tokenizer = FakeTokenizer()
+    sampler = object()
 
     def fake_load(**kwargs: str) -> tuple[str, FakeTokenizer]:
         load_calls.append(kwargs)
@@ -247,6 +249,10 @@ def test_mlx_lm_python_client_loads_once_and_counts_tokenizer_tokens(tmp_path: P
             FakeStreamResponse("結果", token=102, finish_reason="max_tokens"),
         ]
 
+    def fake_make_sampler(**kwargs: float) -> object:
+        sampler_calls.append(kwargs)
+        return sampler
+
     client = MlxLmPythonClient(
         model=ModelIdentity(
             model_id="qwen/qwen3.6-27b-base",
@@ -257,6 +263,7 @@ def test_mlx_lm_python_client_loads_once_and_counts_tokenizer_tokens(tmp_path: P
         adapter_path=adapter_path,
         load_fn=fake_load,
         stream_generate_fn=fake_stream_generate,
+        make_sampler_fn=fake_make_sampler,
     )
 
     first = client.generate(
@@ -277,8 +284,10 @@ def test_mlx_lm_python_client_loads_once_and_counts_tokenizer_tokens(tmp_path: P
         "adapter_path": str(adapter_path.resolve()),
     }
     assert len(stream_calls) == 2
+    assert sampler_calls == [{"temp": 0.2}, {"temp": 0.0}]
     assert stream_calls[0]["verbose"] is False
-    assert stream_calls[0]["temp"] == 0.2
+    assert stream_calls[0]["sampler"] is sampler
+    assert "temp" not in stream_calls[0]
     assert first.generated_text == "生成結果"
     assert first.timing.prompt_tokens == 5
     assert first.timing.completion_tokens == 2
@@ -301,6 +310,7 @@ def test_mlx_lm_python_client_preserves_empty_generation(tmp_path: Path) -> None
         model_path=model_path,
         load_fn=lambda **_kwargs: ("loaded-model", FakeTokenizer()),
         stream_generate_fn=lambda **_kwargs: [FakeStreamResponse(None, finish_reason="eos")],
+        make_sampler_fn=lambda **_kwargs: object(),
     )
 
     response = client.generate(

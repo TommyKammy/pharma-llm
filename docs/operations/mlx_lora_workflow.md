@@ -181,7 +181,8 @@ uv run --extra training python scripts/run_real_mlx_eval.py \
 
 The default runner backend uses the MLX LM Python API so the base model and
 adapter are loaded once per evaluation run rather than once per prompt. It also
-uses tokenizer counts for token metrics when the tokenizer exposes them.
+builds a sampler from the requested temperature and uses tokenizer/stream
+metadata for token metrics and finish reasons when MLX exposes them.
 
 After both real prediction JSONL artifacts exist, produce the Markdown
 comparison report:

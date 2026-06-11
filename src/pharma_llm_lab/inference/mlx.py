@@ -176,6 +176,7 @@ class MlxLmPythonClient:
     adapter_path: Path | None = None
     load_fn: Callable[..., tuple[Any, Any]] | None = None
     stream_generate_fn: Callable[..., Iterable[Any]] | None = None
+    make_sampler_fn: Callable[..., Any] | None = None
 
     def __post_init__(self) -> None:
         if not self.model_path.expanduser().exists():
@@ -189,16 +190,22 @@ class MlxLmPythonClient:
 
         load_fn = self.load_fn
         stream_generate_fn = self.stream_generate_fn
-        if load_fn is None or stream_generate_fn is None:
+        make_sampler_fn = self.make_sampler_fn
+        if load_fn is None or stream_generate_fn is None or make_sampler_fn is None:
             try:
                 from mlx_lm import load, stream_generate
+                from mlx_lm.sample_utils import make_sampler
             except ImportError as exc:
                 raise InferenceContractError(
                     "mlx-lm is required for the Python real MLX client; "
                     "install the training extra or use --client-backend cli"
                 ) from exc
-            load_fn = load
-            stream_generate_fn = stream_generate
+            if load_fn is None:
+                load_fn = load
+            if stream_generate_fn is None:
+                stream_generate_fn = stream_generate
+            if make_sampler_fn is None:
+                make_sampler_fn = make_sampler
 
         load_kwargs: dict[str, str] = {
             "path_or_hf_repo": str(self.model_path.expanduser().resolve())
@@ -209,18 +216,20 @@ class MlxLmPythonClient:
         object.__setattr__(self, "_loaded_model", loaded_model)
         object.__setattr__(self, "_tokenizer", tokenizer)
         object.__setattr__(self, "_stream_generate_fn", stream_generate_fn)
+        object.__setattr__(self, "_make_sampler_fn", make_sampler_fn)
 
     def generate(self, request: InferenceRequest) -> InferenceResponse:
         start = perf_counter()
         generated_text = ""
         generated_token_count: int | None = None
         finish_reason: str | None = None
+        sampler = self._make_sampler_fn(temp=float(request.temperature))
         for response in self._stream_generate_fn(
             model=self._loaded_model,
             tokenizer=self._tokenizer,
             prompt=request.prompt,
             max_tokens=request.max_tokens,
-            temp=float(request.temperature),
+            sampler=sampler,
             verbose=False,
         ):
             generated_text += stream_response_text(response)

@@ -132,10 +132,10 @@ uv run --extra training python scripts/run_real_mlx_eval.py \
   --max-tokens 512
 ```
 
-The runner loads the model once through the MLX LM Python API, calls
-`generate(..., verbose=False)` for each eval record, and writes prediction
-records that reuse the Phase 5 result schema. It is not used by CI and must not
-commit the generated JSONL.
+The runner loads the model once through the MLX LM Python API, builds a sampler
+from the requested temperature, calls `stream_generate(..., verbose=False)` for
+each eval record, and writes prediction records that reuse the Phase 5 result
+schema. It is not used by CI and must not commit the generated JSONL.
 
 After the real prediction JSONL exists, run:
 
