@@ -167,15 +167,20 @@ def strip_mlx_cli_diagnostics(stdout: str) -> str:
         "warning:",
         "[warning]",
     )
+    empty_generation_lines = {"no text generated for this prompt"}
     response_lines: list[str] = []
     for line in stdout.splitlines():
         stripped = line.strip()
         lowered = stripped.lower()
         if not stripped:
             continue
+        if lowered in empty_generation_lines:
+            continue
         if any(lowered.startswith(prefix) for prefix in diagnostic_prefixes):
             continue
         response_lines.append(line)
+    if len(response_lines) == 1 and response_lines[0].strip().lower() == "none":
+        return ""
     return "\n".join(response_lines).strip()
 
 
@@ -317,6 +322,7 @@ class MlxLmCliClient:
             str(float(request.temperature)),
             "--verbose",
             "False",
+            "--ignore-chat-template",
         ]
         if self.adapter_path is not None:
             command.extend(["--adapter-path", str(self.adapter_path.expanduser().resolve())])

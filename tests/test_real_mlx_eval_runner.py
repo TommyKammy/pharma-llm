@@ -221,6 +221,9 @@ def test_mlx_lm_cli_client_invokes_generator_command(tmp_path: Path) -> None:
     assert "--verbose" in client.build_command(
         InferenceRequest(request_id="request-2", prompt="prompt", max_tokens=4)
     )
+    assert "--ignore-chat-template" in client.build_command(
+        InferenceRequest(request_id="request-2", prompt="prompt", max_tokens=4)
+    )
     assert response.timing.prompt_tokens is None
     assert response.timing.completion_tokens is None
     assert response.timing.tokens_per_second is None
@@ -346,6 +349,29 @@ def test_mlx_lm_cli_client_strips_known_diagnostics(tmp_path: Path) -> None:
     )
 
     assert response.generated_text == "生成結果"
+
+
+def test_mlx_lm_cli_client_preserves_empty_generation(tmp_path: Path) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    client = MlxLmCliClient(
+        model=ModelIdentity(model_id="qwen/qwen3.6-27b-base", provider="mlx"),
+        model_path=model_path,
+        command=(
+            sys.executable,
+            "-c",
+            (
+                "print('No text generated for this prompt'); "
+                "print('None')"
+            ),
+        ),
+    )
+
+    response = client.generate(
+        InferenceRequest(request_id="request-1", prompt="prompt", max_tokens=4)
+    )
+
+    assert response.generated_text == ""
 
 
 def test_real_eval_cli_writes_base_predictions_with_fake_generator(tmp_path: Path) -> None:
