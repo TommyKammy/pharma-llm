@@ -151,38 +151,37 @@ mock predictions:
 
 ```bash
 uv run python scripts/run_baseline_eval.py \
-  --output results/baseline/qwen_base_predictions.jsonl \
-  --model-label qwen-base \
-  --run-id phase6-base-mock
+  --model-label qwen-base
 
 uv run python scripts/run_lora_eval.py \
-  --output results/lora/qwen_sft_lora_v1_predictions.jsonl \
-  --adapter-id qwen_sft_lora_r16_v1 \
-  --run-id phase6-lora-mock
+  --adapter-id qwen_sft_lora_r16_v1
+
+uv run python scripts/generate_lora_comparison_report.py
 ```
 
-For a reviewed local adapter, generate the LoRA prediction JSONL with the
-recorded adapter metadata so the model and adapter identity stay aligned:
+For a reviewed local adapter, do not use the CI-safe mock LoRA runner as proof
+of adapter quality. Generate the real LoRA prediction JSONL locally with the
+executed adapter and preserve the existing prediction schema with:
 
-```bash
-uv run python scripts/run_lora_eval.py \
-  --adapter-metadata /Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/adapter_metadata.json \
-  --output /Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/lora_predictions.jsonl
-```
+- `model.provider = "mlx"`
+- `model.adapter_id = adapter_metadata.run_id`
+- the same Phase 4 eval IDs as the real Qwen base artifact
 
-Then produce the Markdown comparison report:
+After both real prediction JSONL artifacts exist, produce the Markdown
+comparison report:
 
 ```bash
 uv run python scripts/generate_lora_comparison_report.py \
-  --base-input results/baseline/qwen_base_predictions.jsonl \
+  --base-input /Users/tsinfra/Dev/pharma-llm/local/runs/baseline/phase6-qwen-base/qwen_base_predictions.jsonl \
   --lora-input /Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/lora_predictions.jsonl \
   --adapter-metadata /Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/adapter_metadata.json \
   --output results/reports/lora_comparison_report.md
 ```
 
 The report rejects mismatched eval ID sets, requires base predictions to have no
-adapter ID, requires LoRA predictions to include an adapter ID, and surfaces
-safety/style notes even when scoring remains manual-review-only.
+adapter ID, requires LoRA predictions to include an adapter ID, requires the
+same provider before computing deltas, and surfaces safety/style notes even when
+scoring remains manual-review-only.
 
 ## Initial Smoke Tests
 

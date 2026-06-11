@@ -81,3 +81,29 @@ def test_lora_runner_cli_writes_prediction_jsonl(tmp_path: Path) -> None:
     assert len(records) == 30
     assert records[0]["run_id"] == "cli-lora"
     assert records[0]["model"]["adapter_id"] == "qwen_sft_lora_r16_v1"
+
+
+def test_lora_runner_cli_rejects_metadata_backed_mock(tmp_path: Path) -> None:
+    metadata_path = tmp_path / "adapter_metadata.json"
+    metadata_path.write_text("{}\n", encoding="utf-8")
+    output_path = tmp_path / "lora_predictions.jsonl"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/run_lora_eval.py",
+            "--input",
+            str(SEED_PATH),
+            "--output",
+            str(output_path),
+            "--adapter-metadata",
+            str(metadata_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "--adapter-metadata requires real LoRA generation" in result.stderr
+    assert not output_path.exists()

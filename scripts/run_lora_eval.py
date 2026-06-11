@@ -11,8 +11,6 @@ if str(REPO_ROOT) not in sys.path:
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from pharma_llm_lab.baseline import BaselineResultError  # noqa: E402
-from pharma_llm_lab.baseline.lora_comparison import load_adapter_metadata  # noqa: E402
 from pharma_llm_lab.inference import MockMlxInferenceClient, ModelIdentity  # noqa: E402
 from scripts.run_baseline_eval import (  # noqa: E402
     BaselinePrediction,
@@ -84,7 +82,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--adapter-metadata",
         type=Path,
         default=None,
-        help="Optional executed adapter metadata JSON used to derive model_id and adapter_id.",
+        help=(
+            "Reserved for real local LoRA generation. The CI-safe mock runner refuses "
+            "metadata-backed runs so executed adapters are not reported as mock outputs."
+        ),
     )
     parser.add_argument("--max-tokens", type=int, default=128)
     return parser
@@ -96,12 +97,11 @@ def main(argv: list[str] | None = None) -> int:
     model_id = args.model_id
     adapter_id = args.adapter_id
     if args.adapter_metadata is not None:
-        try:
-            metadata = load_adapter_metadata(args.adapter_metadata)
-        except BaselineResultError as exc:
-            parser.error(str(exc))
-        model_id = metadata["model"]["id"]
-        adapter_id = metadata["run_id"]
+        parser.error(
+            "--adapter-metadata requires real LoRA generation, which is not wired in "
+            "this CI-safe mock runner; generate the local prediction JSONL with the "
+            "executed adapter and pass it to generate_lora_comparison_report.py"
+        )
 
     try:
         predictions = run_mock_lora_eval(
