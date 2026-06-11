@@ -6,7 +6,7 @@ import subprocess
 from dataclasses import dataclass
 from time import perf_counter
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Iterable, Protocol
 
 from pharma_llm_lab.inference.contracts import (
     InferenceContractError,
@@ -75,23 +75,96 @@ def tokenizer_token_count(tokenizer: Any, text: str) -> int | None:
     return len(tokens)
 
 
-def finish_reason_from_completion_tokens(
-    completion_tokens: int | None,
-    max_tokens: int,
-) -> str:
-    if completion_tokens is None:
-        return "unknown"
-    if completion_tokens >= max_tokens:
-        return "length"
-    return "stop"
-
-
 def normalize_generated_text(value: Any) -> str:
     if value is None:
         return ""
     if not isinstance(value, str):
         raise InferenceContractError("generated_text must be a string or None")
     return value
+
+
+def stream_response_text(response: Any) -> str:
+    if isinstance(response, str):
+        return response
+    text = getattr(response, "text", "")
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        raise InferenceContractError("stream response text must be a string or None")
+    return text
+
+
+def stream_response_token_count(response: Any) -> int | None:
+    token = getattr(response, "token", None)
+    if token is None:
+        token = getattr(response, "tokens", None)
+    if token is None:
+        return None
+    if isinstance(token, int):
+        return 1
+    if hasattr(token, "tolist"):
+        token = token.tolist()
+    if hasattr(token, "__len__"):
+        return len(token)
+    return 1
+
+
+def normalize_finish_reason(value: Any) -> str | None:
+    if value is None:
+        return None
+    raw_reason = str(value).strip().lower()
+    if not raw_reason:
+        return None
+    if raw_reason in {"length", "max_tokens", "max token", "max-tokens"}:
+        return "length"
+    if raw_reason in {"stop", "eos", "end", "end_turn"}:
+        return "stop"
+    return raw_reason
+
+
+def stream_response_finish_reason(response: Any) -> str | None:
+    for field_name in ("finish_reason", "stop_reason", "finishReason"):
+        reason = normalize_finish_reason(getattr(response, field_name, None))
+        if reason is not None:
+            return reason
+    return None
+
+
+def finish_reason_from_generated_tokens(
+    generated_token_count: int | None,
+    max_tokens: int,
+) -> str:
+    if generated_token_count is None:
+        return "unknown"
+    if generated_token_count >= max_tokens:
+        return "length"
+    return "stop"
+
+
+def strip_mlx_cli_diagnostics(stdout: str) -> str:
+    diagnostic_prefixes = (
+        "========",
+        "--------",
+        "prompt:",
+        "generation:",
+        "peak memory:",
+        "prompt tokens:",
+        "generation tokens:",
+        "tokens per second:",
+        "wired memory",
+        "warning:",
+        "[warning]",
+    )
+    response_lines: list[str] = []
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        lowered = stripped.lower()
+        if not stripped:
+            continue
+        if any(lowered.startswith(prefix) for prefix in diagnostic_prefixes):
+            continue
+        response_lines.append(line)
+    return "\n".join(response_lines).strip()
 
 
 @dataclass(frozen=True)
@@ -102,7 +175,7 @@ class MlxLmPythonClient:
     model_path: Path
     adapter_path: Path | None = None
     load_fn: Callable[..., tuple[Any, Any]] | None = None
-    generate_fn: Callable[..., str] | None = None
+    stream_generate_fn: Callable[..., Iterable[Any]] | None = None
 
     def __post_init__(self) -> None:
         if not self.model_path.expanduser().exists():
@@ -115,17 +188,17 @@ class MlxLmPythonClient:
             raise InferenceContractError("LoRA MLX client requires model.adapter_id")
 
         load_fn = self.load_fn
-        generate_fn = self.generate_fn
-        if load_fn is None or generate_fn is None:
+        stream_generate_fn = self.stream_generate_fn
+        if load_fn is None or stream_generate_fn is None:
             try:
-                from mlx_lm import generate, load
+                from mlx_lm import load, stream_generate
             except ImportError as exc:
                 raise InferenceContractError(
                     "mlx-lm is required for the Python real MLX client; "
                     "install the training extra or use --client-backend cli"
                 ) from exc
             load_fn = load
-            generate_fn = generate
+            stream_generate_fn = stream_generate
 
         load_kwargs: dict[str, str] = {
             "path_or_hf_repo": str(self.model_path.expanduser().resolve())
@@ -135,26 +208,39 @@ class MlxLmPythonClient:
         loaded_model, tokenizer = load_fn(**load_kwargs)
         object.__setattr__(self, "_loaded_model", loaded_model)
         object.__setattr__(self, "_tokenizer", tokenizer)
-        object.__setattr__(self, "_generate_fn", generate_fn)
+        object.__setattr__(self, "_stream_generate_fn", stream_generate_fn)
 
     def generate(self, request: InferenceRequest) -> InferenceResponse:
         start = perf_counter()
-        generated_text = normalize_generated_text(
-            self._generate_fn(
-                model=self._loaded_model,
-                tokenizer=self._tokenizer,
-                prompt=request.prompt,
-                max_tokens=request.max_tokens,
-                temp=float(request.temperature),
-                verbose=False,
-            )
-        )
+        generated_text = ""
+        generated_token_count: int | None = None
+        finish_reason: str | None = None
+        for response in self._stream_generate_fn(
+            model=self._loaded_model,
+            tokenizer=self._tokenizer,
+            prompt=request.prompt,
+            max_tokens=request.max_tokens,
+            temp=float(request.temperature),
+            verbose=False,
+        ):
+            generated_text += stream_response_text(response)
+            token_count = stream_response_token_count(response)
+            if token_count is not None:
+                generated_token_count = (generated_token_count or 0) + token_count
+            response_finish_reason = stream_response_finish_reason(response)
+            if response_finish_reason is not None:
+                finish_reason = response_finish_reason
         total_latency_ms = round((perf_counter() - start) * 1000, 3)
         prompt_tokens = tokenizer_token_count(self._tokenizer, request.prompt)
-        completion_tokens = tokenizer_token_count(self._tokenizer, generated_text)
+        completion_tokens = generated_token_count
         tokens_per_second = None
         if completion_tokens is not None and total_latency_ms > 0:
             tokens_per_second = round(completion_tokens / (total_latency_ms / 1000), 3)
+        if finish_reason is None:
+            finish_reason = finish_reason_from_generated_tokens(
+                generated_token_count,
+                request.max_tokens,
+            )
 
         return InferenceResponse(
             request_id=request.request_id,
@@ -167,10 +253,7 @@ class MlxLmPythonClient:
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
             ),
-            finish_reason=finish_reason_from_completion_tokens(
-                completion_tokens,
-                request.max_tokens,
-            ),
+            finish_reason=finish_reason,
         )
 
 
@@ -230,7 +313,7 @@ class MlxLmCliClient:
                 f"mlx_lm.generate failed with exit code {result.returncode}: {stderr}"
             )
 
-        generated_text = result.stdout.strip()
+        generated_text = strip_mlx_cli_diagnostics(result.stdout)
         return InferenceResponse(
             request_id=request.request_id,
             generated_text=generated_text,

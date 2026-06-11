@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,13 @@ class FakeTokenizer:
             {"text": text, "add_special_tokens": add_special_tokens}
         )
         return [ord(char) for char in text]
+
+
+@dataclass(frozen=True)
+class FakeStreamResponse:
+    text: str | None
+    token: int | None = None
+    finish_reason: str | None = None
 
 
 def write_adapter_metadata(path: Path, *, local_root: Path, status: str = "executed") -> Path:
@@ -225,16 +233,19 @@ def test_mlx_lm_python_client_loads_once_and_counts_tokenizer_tokens(tmp_path: P
     model_path.mkdir()
     adapter_path.mkdir()
     load_calls: list[dict[str, str]] = []
-    generate_calls: list[dict[str, object]] = []
+    stream_calls: list[dict[str, object]] = []
     tokenizer = FakeTokenizer()
 
     def fake_load(**kwargs: str) -> tuple[str, FakeTokenizer]:
         load_calls.append(kwargs)
         return "loaded-model", tokenizer
 
-    def fake_generate(**kwargs: object) -> str:
-        generate_calls.append(kwargs)
-        return "生成結果"
+    def fake_stream_generate(**kwargs: object) -> list[FakeStreamResponse]:
+        stream_calls.append(kwargs)
+        return [
+            FakeStreamResponse("生成", token=101),
+            FakeStreamResponse("結果", token=102, finish_reason="max_tokens"),
+        ]
 
     client = MlxLmPythonClient(
         model=ModelIdentity(
@@ -245,7 +256,7 @@ def test_mlx_lm_python_client_loads_once_and_counts_tokenizer_tokens(tmp_path: P
         model_path=model_path,
         adapter_path=adapter_path,
         load_fn=fake_load,
-        generate_fn=fake_generate,
+        stream_generate_fn=fake_stream_generate,
     )
 
     first = client.generate(
@@ -265,16 +276,20 @@ def test_mlx_lm_python_client_loads_once_and_counts_tokenizer_tokens(tmp_path: P
         "path_or_hf_repo": str(model_path.resolve()),
         "adapter_path": str(adapter_path.resolve()),
     }
-    assert len(generate_calls) == 2
-    assert generate_calls[0]["verbose"] is False
-    assert generate_calls[0]["temp"] == 0.2
+    assert len(stream_calls) == 2
+    assert stream_calls[0]["verbose"] is False
+    assert stream_calls[0]["temp"] == 0.2
     assert first.generated_text == "生成結果"
     assert first.timing.prompt_tokens == 5
-    assert first.timing.completion_tokens == 4
+    assert first.timing.completion_tokens == 2
     assert first.timing.tokens_per_second is not None
     assert first.finish_reason == "length"
     assert second.timing.prompt_tokens == 4
-    assert all(call["add_special_tokens"] is False for call in tokenizer.encode_calls)
+    assert all(
+        call["add_special_tokens"] is False
+        for call in tokenizer.encode_calls
+        if call["text"] in {"安全性確認", "業務文体"}
+    )
 
 
 def test_mlx_lm_python_client_preserves_empty_generation(tmp_path: Path) -> None:
@@ -285,7 +300,7 @@ def test_mlx_lm_python_client_preserves_empty_generation(tmp_path: Path) -> None
         model=ModelIdentity(model_id="qwen/qwen3.6-27b-base", provider="mlx"),
         model_path=model_path,
         load_fn=lambda **_kwargs: ("loaded-model", FakeTokenizer()),
-        generate_fn=lambda **_kwargs: None,
+        stream_generate_fn=lambda **_kwargs: [FakeStreamResponse(None, finish_reason="eos")],
     )
 
     response = client.generate(
@@ -293,8 +308,32 @@ def test_mlx_lm_python_client_preserves_empty_generation(tmp_path: Path) -> None
     )
 
     assert response.generated_text == ""
-    assert response.timing.completion_tokens == 0
+    assert response.timing.completion_tokens is None
     assert response.finish_reason == "stop"
+
+
+def test_mlx_lm_cli_client_strips_known_diagnostics(tmp_path: Path) -> None:
+    model_path = tmp_path / "model"
+    model_path.mkdir()
+    client = MlxLmCliClient(
+        model=ModelIdentity(model_id="qwen/qwen3.6-27b-base", provider="mlx"),
+        model_path=model_path,
+        command=(
+            sys.executable,
+            "-c",
+            (
+                "print('Wired memory warning: pressure high'); "
+                "print('========'); "
+                "print('生成結果')"
+            ),
+        ),
+    )
+
+    response = client.generate(
+        InferenceRequest(request_id="request-1", prompt="prompt", max_tokens=4)
+    )
+
+    assert response.generated_text == "生成結果"
 
 
 def test_real_eval_cli_writes_base_predictions_with_fake_generator(tmp_path: Path) -> None:
