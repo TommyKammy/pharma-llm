@@ -119,6 +119,24 @@ The prediction JSONL is intentionally local-only. Use the same eval-id
 fingerprint when comparing base and LoRA outputs; reports must not compare
 different prompt subsets.
 
+After confirming the local Qwen model path exists, generate the real local base
+prediction JSONL with:
+
+```bash
+uv run --extra training python scripts/run_real_mlx_eval.py \
+  --input evals/prompts/phase4_seed.jsonl \
+  --output /Users/tsinfra/Dev/pharma-llm/local/runs/baseline/phase6-qwen-base/qwen_base_predictions.jsonl \
+  --run-id phase6-qwen-base \
+  --model-id qwen/qwen3.6-27b-base \
+  --model-path /Users/tsinfra/Dev/pharma-llm/local/models/qwen3.6-27b-base \
+  --max-tokens 512
+```
+
+The runner loads the model once through the MLX LM Python API, builds a sampler
+from the requested temperature, calls `stream_generate(...)` for each eval
+record, and writes prediction records that reuse the Phase 5 result schema. It
+is not used by CI and must not commit the generated JSONL.
+
 After the real prediction JSONL exists, run:
 
 ```bash
