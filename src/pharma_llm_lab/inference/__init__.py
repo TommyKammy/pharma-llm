@@ -6,12 +6,17 @@ from pharma_llm_lab.inference.contracts import (
     InferenceTiming,
     ModelIdentity,
 )
-from pharma_llm_lab.inference.mlx import MockMlxInferenceClient, MlxInferenceClient
+from pharma_llm_lab.inference.mlx import (
+    MlxLmCliClient,
+    MockMlxInferenceClient,
+    MlxInferenceClient,
+)
 
 __all__ = [
     "InferenceRequest",
     "InferenceResponse",
     "InferenceTiming",
+    "MlxLmCliClient",
     "MlxInferenceClient",
     "MockMlxInferenceClient",
     "ModelIdentity",

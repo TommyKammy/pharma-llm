@@ -167,6 +167,18 @@ executed adapter and preserve the existing prediction schema with:
 - `model.adapter_id = adapter_metadata.run_id`
 - the same Phase 4 eval IDs as the real Qwen base artifact
 
+Use the real local MLX eval runner after `adapter_metadata.json` has `status:
+executed`:
+
+```bash
+uv run --extra training python scripts/run_real_mlx_eval.py \
+  --input evals/prompts/phase4_seed.jsonl \
+  --output /Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/lora_predictions.jsonl \
+  --run-id phase6-qwen-sft-lora-r16-v1 \
+  --adapter-metadata /Users/tsinfra/Dev/pharma-llm/local/runs/qwen_sft_lora_r16_v1/adapter_metadata.json \
+  --max-tokens 512
+```
+
 After both real prediction JSONL artifacts exist, produce the Markdown
 comparison report:
 
