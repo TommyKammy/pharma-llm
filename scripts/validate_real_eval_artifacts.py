@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -20,6 +21,7 @@ DEFAULT_LOCAL_ROOT = Path("/Users/tsinfra/Dev/pharma-llm/local")
 DEFAULT_BASE_RUN_DIR = DEFAULT_LOCAL_ROOT / "runs" / "baseline" / "phase6-qwen-base"
 DEFAULT_LORA_RUN_DIR = DEFAULT_LOCAL_ROOT / "runs" / "qwen_sft_lora_r16_v1"
 DEFAULT_MODEL_PATH = DEFAULT_LOCAL_ROOT / "models" / "qwen3.6-27b-base"
+REAL_PROVIDER = "mlx"
 
 
 class ArtifactValidationError(ValueError):
@@ -48,6 +50,27 @@ def require_dir(path: Path, label: str) -> None:
         raise ArtifactValidationError(f"{label} must be a directory: {path}")
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def require_digest(path: Path, expected_sha256: str, label: str) -> None:
+    require_file(path, label)
+    actual_sha256 = file_sha256(path)
+    if actual_sha256 != expected_sha256:
+        raise ArtifactValidationError(
+            f"{label} sha256 mismatch for {path}: expected {expected_sha256}, got {actual_sha256}"
+        )
+
+
+def resolve_metadata_path(value: str) -> Path:
+    return Path(value).expanduser().resolve()
+
+
 def validate_summary_matches_predictions(summary_path: Path, predictions_path: Path) -> None:
     require_file(summary_path, "base summary")
     summary_payload = load_json_object(summary_path)
@@ -65,13 +88,48 @@ def validate_summary_matches_predictions(summary_path: Path, predictions_path: P
         )
 
 
-def validate_category_metrics_csv(path: Path) -> None:
+def expected_category_metric_rows(predictions_path: Path) -> dict[str, dict[str, str]]:
+    summary = aggregate_results(load_baseline_results(predictions_path))
+    rows: dict[str, dict[str, str]] = {}
+    for metrics in summary.category_metrics:
+        row = metrics.to_mapping()
+        rows[metrics.category.value] = {
+            "run_id": str(row["run_id"]),
+            "model_id": str(row["model_id"]),
+            "provider": str(row["provider"]),
+            "adapter_id": "" if row["adapter_id"] is None else str(row["adapter_id"]),
+            "category": str(row["category"]),
+            "count": str(row["count"]),
+            "avg_total_latency_ms": str(row["avg_total_latency_ms"]),
+            "avg_ttft_ms": "" if row["avg_ttft_ms"] is None else str(row["avg_ttft_ms"]),
+            "avg_tokens_per_second": (
+                "" if row["avg_tokens_per_second"] is None else str(row["avg_tokens_per_second"])
+            ),
+            "scoring_status_counts": json.dumps(
+                row["scoring_status_counts"], ensure_ascii=False, sort_keys=True
+            ),
+        }
+    return rows
+
+
+def validate_category_metrics_csv(path: Path, predictions_path: Path) -> None:
     require_file(path, "base category metrics")
     with path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         if reader.fieldnames is None:
             raise ArtifactValidationError(f"{path}: CSV header is missing")
-        required = {"run_id", "model_id", "provider", "adapter_id", "category", "count"}
+        required = {
+            "run_id",
+            "model_id",
+            "provider",
+            "adapter_id",
+            "category",
+            "count",
+            "avg_total_latency_ms",
+            "avg_ttft_ms",
+            "avg_tokens_per_second",
+            "scoring_status_counts",
+        }
         missing = sorted(required - set(reader.fieldnames))
         if missing:
             raise ArtifactValidationError(
@@ -80,6 +138,20 @@ def validate_category_metrics_csv(path: Path) -> None:
         rows = list(reader)
     if not rows:
         raise ArtifactValidationError(f"{path}: at least one category row is required")
+    expected_rows = expected_category_metric_rows(predictions_path)
+    actual_rows = {row.get("category", ""): {key: row.get(key, "") for key in required} for row in rows}
+    if set(actual_rows) != set(expected_rows):
+        raise ArtifactValidationError(f"{path}: category rows do not match base predictions")
+    for category, expected_row in expected_rows.items():
+        actual_row = actual_rows[category]
+        mismatches = [
+            field for field, expected_value in expected_row.items() if actual_row[field] != expected_value
+        ]
+        if mismatches:
+            raise ArtifactValidationError(
+                f"{path}: category {category} does not match base predictions for field(s): "
+                + ", ".join(mismatches)
+            )
 
 
 def validate_adapter_metadata_file(path: Path) -> dict[str, Any]:
@@ -91,20 +163,106 @@ def validate_adapter_metadata_file(path: Path) -> dict[str, Any]:
         raise ArtifactValidationError(f"{path}: invalid adapter metadata: {exc}") from exc
     if metadata["status"] != "executed":
         raise ArtifactValidationError(f"{path}: adapter metadata status must be executed")
+    if metadata["model"]["provider"] != REAL_PROVIDER:
+        raise ArtifactValidationError(
+            f"{path}: adapter metadata model.provider must be {REAL_PROVIDER!r}"
+        )
     return metadata
 
 
 def validate_metadata_artifact_paths(metadata: dict[str, Any]) -> None:
-    model_path = Path(metadata["model"]["path"]).expanduser()
-    adapter_path = Path(metadata["adapter"]["path"]).expanduser()
-    generated_config_path = Path(metadata["config"]["generated_path"]).expanduser()
-    training_input_path = Path(metadata["dataset"]["training_input"]["path"]).expanduser()
+    model_path = resolve_metadata_path(metadata["model"]["path"])
+    adapter_path = resolve_metadata_path(metadata["adapter"]["path"])
+    generated_config_path = resolve_metadata_path(metadata["config"]["generated_path"])
+    training_input_path = resolve_metadata_path(metadata["dataset"]["training_input"]["path"])
+    source_dataset_path = resolve_metadata_path(metadata["dataset"]["path"])
+    source_config_path = resolve_metadata_path(metadata["config"]["source_path"])
     require_dir(model_path, "metadata model.path")
     require_dir(adapter_path, "metadata adapter.path")
-    require_file(generated_config_path, "metadata config.generated_path")
-    require_file(training_input_path, "metadata dataset.training_input.path")
+    require_digest(source_dataset_path, metadata["dataset"]["sha256"], "metadata dataset.path")
+    require_digest(
+        training_input_path,
+        metadata["dataset"]["training_input"]["sha256"],
+        "metadata dataset.training_input.path",
+    )
+    require_digest(source_config_path, metadata["config"]["source_sha256"], "metadata config.source_path")
+    require_digest(
+        generated_config_path,
+        metadata["config"]["generated_sha256"],
+        "metadata config.generated_path",
+    )
     for marker in metadata["adapter"]["marker_files"]:
         require_file(adapter_path / marker, f"adapter marker {marker}")
+
+
+def require_path_matches(path: Path, expected_path: Path, label: str) -> None:
+    if path.expanduser().resolve() != expected_path.expanduser().resolve():
+        raise ArtifactValidationError(f"{label} must match {expected_path}: {path}")
+
+
+def validate_run_plan_file(path: Path, metadata: dict[str, Any]) -> None:
+    require_file(path, "LoRA run plan")
+    run_plan = load_json_object(path)
+    expected_paths = {
+        "model_path": resolve_metadata_path(metadata["model"]["path"]),
+        "adapter_path": resolve_metadata_path(metadata["adapter"]["path"]),
+        "dataset_path": resolve_metadata_path(metadata["dataset"]["path"]),
+        "train_data_path": resolve_metadata_path(metadata["dataset"]["training_input"]["path"]),
+        "mlx_config_path": resolve_metadata_path(metadata["config"]["generated_path"]),
+        "config_path": resolve_metadata_path(metadata["config"]["source_path"]),
+    }
+    if run_plan.get("run_id") != metadata["run_id"]:
+        raise ArtifactValidationError(f"{path}: run_id must match adapter metadata")
+    for field, expected_path in expected_paths.items():
+        value = run_plan.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ArtifactValidationError(f"{path}: {field} must be a non-empty string")
+        require_path_matches(Path(value), expected_path, f"{path}: {field}")
+    if run_plan.get("dataset_sha256") != metadata["dataset"]["sha256"]:
+        raise ArtifactValidationError(f"{path}: dataset_sha256 must match adapter metadata")
+    if run_plan.get("config_sha256") != metadata["config"]["source_sha256"]:
+        raise ArtifactValidationError(f"{path}: config_sha256 must match adapter metadata")
+    training = run_plan.get("training")
+    if not isinstance(training, dict):
+        raise ArtifactValidationError(f"{path}: training must be an object")
+    for field, expected_value in metadata["training"].items():
+        if field == "epochs":
+            continue
+        if training.get(field) != expected_value:
+            raise ArtifactValidationError(f"{path}: training.{field} must match adapter metadata")
+    mlx_config = run_plan.get("mlx_config")
+    if not isinstance(mlx_config, dict):
+        raise ArtifactValidationError(f"{path}: mlx_config must be an object")
+    require_path_matches(
+        Path(str(mlx_config.get("model"))),
+        expected_paths["model_path"],
+        f"{path}: mlx_config.model",
+    )
+    require_path_matches(
+        Path(str(mlx_config.get("adapter_path"))),
+        expected_paths["adapter_path"],
+        f"{path}: mlx_config.adapter_path",
+    )
+
+
+def validate_real_provider_identity(
+    *,
+    base_predictions: Path,
+    lora_predictions: Path,
+    adapter_metadata: Path,
+) -> None:
+    comparison = load_lora_comparison_inputs(
+        base_path=base_predictions,
+        lora_path=lora_predictions,
+        adapter_metadata_path=adapter_metadata,
+    )
+    providers = {
+        "base predictions": comparison.base.summary.provider,
+        "LoRA predictions": comparison.lora.summary.provider,
+    }
+    for label, provider in providers.items():
+        if provider != REAL_PROVIDER:
+            raise ArtifactValidationError(f"{label} provider must be {REAL_PROVIDER!r}")
 
 
 def validate_real_eval_artifacts(
@@ -166,22 +324,29 @@ def collect_real_eval_artifact_errors(
     record_errors(lambda: require_dir(model_path.expanduser(), "Qwen base model path"))
     record_errors(lambda: require_file(base_predictions, "base predictions"))
     record_errors(lambda: require_file(lora_predictions, "LoRA predictions"))
-    record_errors(lambda: require_file(run_plan, "LoRA run plan"))
     try:
         metadata = validate_adapter_metadata_file(adapter_metadata)
     except ArtifactValidationError as exc:
         errors.append(str(exc))
     if metadata is not None:
         record_errors(lambda: validate_metadata_artifact_paths(metadata))
+        record_errors(lambda: validate_run_plan_file(run_plan, metadata))
     if base_predictions.is_file():
         record_errors(lambda: validate_summary_matches_predictions(base_summary, base_predictions))
-        record_errors(lambda: validate_category_metrics_csv(base_category_metrics))
+        record_errors(lambda: validate_category_metrics_csv(base_category_metrics, base_predictions))
     if base_predictions.is_file() and lora_predictions.is_file() and adapter_metadata.is_file():
         record_errors(
             lambda: load_lora_comparison_inputs(
                 base_path=base_predictions,
                 lora_path=lora_predictions,
                 adapter_metadata_path=adapter_metadata,
+            )
+        )
+        record_errors(
+            lambda: validate_real_provider_identity(
+                base_predictions=base_predictions,
+                lora_predictions=lora_predictions,
+                adapter_metadata=adapter_metadata,
             )
         )
     return tuple(errors)
