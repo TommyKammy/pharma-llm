@@ -10,6 +10,8 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
@@ -21,6 +23,7 @@ DEFAULT_LOCAL_ROOT = Path("/Users/tsinfra/Dev/pharma-llm/local")
 DEFAULT_BASE_RUN_DIR = DEFAULT_LOCAL_ROOT / "runs" / "baseline" / "phase6-qwen-base"
 DEFAULT_LORA_RUN_DIR = DEFAULT_LOCAL_ROOT / "runs" / "qwen_sft_lora_r16_v1"
 DEFAULT_MODEL_PATH = DEFAULT_LOCAL_ROOT / "models" / "qwen3.6-27b-base"
+DEFAULT_EVAL_PATH = Path("evals/prompts/phase4_seed.jsonl")
 REAL_PROVIDER = "mlx"
 
 
@@ -75,17 +78,8 @@ def validate_summary_matches_predictions(summary_path: Path, predictions_path: P
     require_file(summary_path, "base summary")
     summary_payload = load_json_object(summary_path)
     prediction_summary = aggregate_results(load_baseline_results(predictions_path)).to_mapping()
-    expected_fields = ("run_id", "model_id", "provider", "adapter_id", "total_count")
-    mismatches = [
-        field
-        for field in expected_fields
-        if summary_payload.get(field) != prediction_summary[field]
-    ]
-    if mismatches:
-        raise ArtifactValidationError(
-            f"{summary_path}: does not match base predictions for field(s): "
-            + ", ".join(mismatches)
-        )
+    if summary_payload != prediction_summary:
+        raise ArtifactValidationError(f"{summary_path}: does not match base predictions")
 
 
 def expected_category_metric_rows(predictions_path: Path) -> dict[str, dict[str, str]]:
@@ -138,6 +132,14 @@ def validate_category_metrics_csv(path: Path, predictions_path: Path) -> None:
         rows = list(reader)
     if not rows:
         raise ArtifactValidationError(f"{path}: at least one category row is required")
+    categories = [row.get("category", "") for row in rows]
+    duplicate_categories = sorted(
+        category for category in set(categories) if categories.count(category) > 1
+    )
+    if duplicate_categories:
+        raise ArtifactValidationError(
+            f"{path}: duplicate category row(s): " + ", ".join(duplicate_categories)
+        )
     expected_rows = expected_category_metric_rows(predictions_path)
     actual_rows = {row.get("category", ""): {key: row.get(key, "") for key in required} for row in rows}
     if set(actual_rows) != set(expected_rows):
@@ -193,6 +195,11 @@ def validate_metadata_artifact_paths(metadata: dict[str, Any]) -> None:
     )
     for marker in metadata["adapter"]["marker_files"]:
         require_file(adapter_path / marker, f"adapter marker {marker}")
+
+
+def validate_requested_model_path(model_path: Path, metadata: dict[str, Any]) -> None:
+    expected_path = resolve_metadata_path(metadata["model"]["path"])
+    require_path_matches(model_path, expected_path, "requested model path")
 
 
 def require_path_matches(path: Path, expected_path: Path, label: str) -> None:
@@ -265,6 +272,65 @@ def validate_real_provider_identity(
             raise ArtifactValidationError(f"{label} provider must be {REAL_PROVIDER!r}")
 
 
+def expected_eval_mapping(eval_path: Path) -> dict[str, str]:
+    require_file(eval_path, "Phase 4 eval set")
+    mapping: dict[str, str] = {}
+    with eval_path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ArtifactValidationError(
+                    f"{eval_path}:{line_number}: malformed JSON: {exc.msg}"
+                ) from exc
+            if not isinstance(record, dict):
+                raise ArtifactValidationError(f"{eval_path}:{line_number}: record must be an object")
+            eval_id = record.get("id")
+            category = record.get("category")
+            if not isinstance(eval_id, str) or not eval_id.strip():
+                raise ArtifactValidationError(f"{eval_path}:{line_number}: id must be a non-empty string")
+            if not isinstance(category, str) or not category.strip():
+                raise ArtifactValidationError(
+                    f"{eval_path}:{line_number}: category must be a non-empty string"
+                )
+            if eval_id in mapping:
+                raise ArtifactValidationError(f"{eval_path}:{line_number}: duplicate eval id {eval_id}")
+            mapping[eval_id] = category
+    if not mapping:
+        raise ArtifactValidationError(f"{eval_path}: no eval records found")
+    return mapping
+
+
+def prediction_eval_mapping(path: Path) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for result in load_baseline_results(path):
+        if result.eval_id in mapping:
+            raise ArtifactValidationError(f"{path}: duplicate eval id {result.eval_id}")
+        mapping[result.eval_id] = result.category.value
+    return mapping
+
+
+def validate_phase4_eval_coverage(
+    *,
+    eval_path: Path,
+    base_predictions: Path,
+    lora_predictions: Path,
+) -> None:
+    expected = expected_eval_mapping(eval_path)
+    for label, path in (
+        ("base predictions", base_predictions),
+        ("LoRA predictions", lora_predictions),
+    ):
+        actual = prediction_eval_mapping(path)
+        if actual != expected:
+            raise ArtifactValidationError(
+                f"{label} must match Phase 4 eval set {eval_path}: "
+                f"expected {len(expected)} record(s), got {len(actual)}"
+            )
+
+
 def validate_real_eval_artifacts(
     *,
     model_path: Path,
@@ -274,9 +340,11 @@ def validate_real_eval_artifacts(
     lora_predictions: Path,
     adapter_metadata: Path,
     run_plan: Path,
+    eval_path: Path = DEFAULT_EVAL_PATH,
 ) -> tuple[str, ...]:
     errors = collect_real_eval_artifact_errors(
         model_path=model_path,
+        eval_path=eval_path,
         base_predictions=base_predictions,
         base_summary=base_summary,
         base_category_metrics=base_category_metrics,
@@ -305,6 +373,7 @@ def validate_real_eval_artifacts(
 def collect_real_eval_artifact_errors(
     *,
     model_path: Path,
+    eval_path: Path,
     base_predictions: Path,
     base_summary: Path,
     base_category_metrics: Path,
@@ -329,12 +398,20 @@ def collect_real_eval_artifact_errors(
     except ArtifactValidationError as exc:
         errors.append(str(exc))
     if metadata is not None:
+        record_errors(lambda: validate_requested_model_path(model_path.expanduser(), metadata))
         record_errors(lambda: validate_metadata_artifact_paths(metadata))
         record_errors(lambda: validate_run_plan_file(run_plan, metadata))
     if base_predictions.is_file():
         record_errors(lambda: validate_summary_matches_predictions(base_summary, base_predictions))
         record_errors(lambda: validate_category_metrics_csv(base_category_metrics, base_predictions))
     if base_predictions.is_file() and lora_predictions.is_file() and adapter_metadata.is_file():
+        record_errors(
+            lambda: validate_phase4_eval_coverage(
+                eval_path=eval_path,
+                base_predictions=base_predictions,
+                lora_predictions=lora_predictions,
+            )
+        )
         record_errors(
             lambda: load_lora_comparison_inputs(
                 base_path=base_predictions,
@@ -376,6 +453,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Validate host-local real Qwen base and LoRA evaluation artifacts."
     )
     parser.add_argument("--model-path", type=Path, default=DEFAULT_MODEL_PATH)
+    parser.add_argument("--eval-path", type=Path, default=DEFAULT_EVAL_PATH)
     parser.add_argument(
         "--base-predictions",
         type=Path,
@@ -415,6 +493,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         lines = validate_real_eval_artifacts(
             model_path=args.model_path,
+            eval_path=args.eval_path,
             base_predictions=args.base_predictions,
             base_summary=args.base_summary,
             base_category_metrics=args.base_category_metrics,

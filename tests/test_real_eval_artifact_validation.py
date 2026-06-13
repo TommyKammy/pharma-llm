@@ -296,6 +296,57 @@ def test_validate_real_eval_artifacts_rejects_stale_category_metrics_csv(
         validate_real_eval_artifacts(**paths)
 
 
+def test_validate_real_eval_artifacts_rejects_stale_summary_payload(tmp_path: Path) -> None:
+    paths = write_artifact_set(tmp_path)
+    summary = json.loads(paths["base_summary"].read_text(encoding="utf-8"))
+    summary["scoring_status_counts"] = {"unscored": 29, "reviewed": 1}
+    paths["base_summary"].write_text(
+        json.dumps(summary, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ArtifactValidationError, match="summary.json.*does not match"):
+        validate_real_eval_artifacts(**paths)
+
+
+def test_validate_real_eval_artifacts_rejects_duplicate_category_metrics_rows(
+    tmp_path: Path,
+) -> None:
+    paths = write_artifact_set(tmp_path)
+    rows = paths["base_category_metrics"].read_text(encoding="utf-8").splitlines()
+    rows.append(rows[1])
+    paths["base_category_metrics"].write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    with pytest.raises(ArtifactValidationError, match="duplicate category row"):
+        validate_real_eval_artifacts(**paths)
+
+
+def test_validate_real_eval_artifacts_rejects_truncated_phase4_predictions(
+    tmp_path: Path,
+) -> None:
+    paths = write_artifact_set(tmp_path)
+    for key in ("base_predictions", "lora_predictions"):
+        first_line = paths[key].read_text(encoding="utf-8").splitlines()[0]
+        paths[key].write_text(first_line + "\n", encoding="utf-8")
+    summary = aggregate_results(load_baseline_results(paths["base_predictions"]))
+    write_summary_json(paths["base_summary"], summary)
+    write_category_metrics_csv(paths["base_category_metrics"], summary)
+
+    with pytest.raises(ArtifactValidationError, match="must match Phase 4 eval set"):
+        validate_real_eval_artifacts(**paths)
+
+
+def test_validate_real_eval_artifacts_rejects_model_path_metadata_mismatch(
+    tmp_path: Path,
+) -> None:
+    paths = write_artifact_set(tmp_path)
+    other_model_path = tmp_path / "local" / "models" / "other-qwen"
+    other_model_path.mkdir(parents=True)
+
+    with pytest.raises(ArtifactValidationError, match="requested model path must match"):
+        validate_real_eval_artifacts(**{**paths, "model_path": other_model_path})
+
+
 def test_validate_real_eval_artifacts_rejects_stale_run_plan(tmp_path: Path) -> None:
     paths = write_artifact_set(tmp_path)
     run_plan = json.loads(paths["run_plan"].read_text(encoding="utf-8"))
