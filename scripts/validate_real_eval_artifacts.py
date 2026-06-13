@@ -240,16 +240,30 @@ def validate_run_plan_file(path: Path, metadata: dict[str, Any]) -> None:
     mlx_config = run_plan.get("mlx_config")
     if not isinstance(mlx_config, dict):
         raise ArtifactValidationError(f"{path}: mlx_config must be an object")
-    require_path_matches(
-        Path(str(mlx_config.get("model"))),
-        expected_paths["model_path"],
-        f"{path}: mlx_config.model",
-    )
-    require_path_matches(
-        Path(str(mlx_config.get("adapter_path"))),
-        expected_paths["adapter_path"],
-        f"{path}: mlx_config.adapter_path",
-    )
+    expected_mlx_config = {
+        "model": str(expected_paths["model_path"]),
+        "adapter_path": str(expected_paths["adapter_path"]),
+        "data": str(expected_paths["train_data_path"].parent),
+        "train": True,
+        "mask_prompt": metadata["training"]["mask_prompt"],
+        "iters": metadata["training"]["iters"],
+        "batch_size": metadata["training"]["batch_size"],
+        "num_layers": metadata["training"]["num_layers"],
+        "max_seq_length": metadata["training"]["max_seq_length"],
+        "learning_rate": metadata["training"]["learning_rate"],
+        "lora_parameters": {
+            "rank": metadata["training"]["rank"],
+            "scale": metadata["training"]["scale"],
+            "dropout": metadata["training"]["dropout"],
+            "keys": metadata["training"]["target_modules"],
+        },
+    }
+    optional_mlx_config_fields = ("save_every", "steps_per_eval", "steps_per_report", "seed")
+    for field in optional_mlx_config_fields:
+        if field in run_plan.get("training", {}):
+            expected_mlx_config[field] = run_plan["training"][field]
+    if mlx_config != expected_mlx_config:
+        raise ArtifactValidationError(f"{path}: mlx_config must match adapter metadata and run plan")
 
 
 def validate_real_provider_identity(
@@ -272,9 +286,9 @@ def validate_real_provider_identity(
             raise ArtifactValidationError(f"{label} provider must be {REAL_PROVIDER!r}")
 
 
-def expected_eval_mapping(eval_path: Path) -> dict[str, str]:
+def expected_eval_mapping(eval_path: Path) -> dict[str, dict[str, Any]]:
     require_file(eval_path, "Phase 4 eval set")
-    mapping: dict[str, str] = {}
+    mapping: dict[str, dict[str, Any]] = {}
     with eval_path.open("r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
             if not line.strip():
@@ -295,21 +309,79 @@ def expected_eval_mapping(eval_path: Path) -> dict[str, str]:
                 raise ArtifactValidationError(
                     f"{eval_path}:{line_number}: category must be a non-empty string"
                 )
+            prompt = record.get("prompt")
+            if not isinstance(prompt, str):
+                raise ArtifactValidationError(f"{eval_path}:{line_number}: prompt must be a string")
+            expected_points = record.get("expected_points")
+            if not isinstance(expected_points, list) or not all(
+                isinstance(point, str) for point in expected_points
+            ):
+                raise ArtifactValidationError(
+                    f"{eval_path}:{line_number}: expected_points must be a string list"
+                )
             if eval_id in mapping:
                 raise ArtifactValidationError(f"{eval_path}:{line_number}: duplicate eval id {eval_id}")
-            mapping[eval_id] = category
+            mapping[eval_id] = {
+                "category": category,
+                "prompt": prompt,
+                "expected_points": expected_points,
+            }
     if not mapping:
         raise ArtifactValidationError(f"{eval_path}: no eval records found")
     return mapping
 
 
-def prediction_eval_mapping(path: Path) -> dict[str, str]:
-    mapping: dict[str, str] = {}
-    for result in load_baseline_results(path):
+def prediction_eval_mapping(path: Path) -> dict[str, dict[str, Any]]:
+    mapping: dict[str, dict[str, Any]] = {}
+    for line_number, record in iter_prediction_records(path):
+        result = load_prediction_result(path, line_number, record)
         if result.eval_id in mapping:
             raise ArtifactValidationError(f"{path}: duplicate eval id {result.eval_id}")
-        mapping[result.eval_id] = result.category.value
+        prompt = record.get("prompt")
+        if not isinstance(prompt, str):
+            raise ArtifactValidationError(f"{path}:{line_number}: prompt must be a string")
+        expected_points = record.get("expected_points")
+        if not isinstance(expected_points, list) or not all(
+            isinstance(point, str) for point in expected_points
+        ):
+            raise ArtifactValidationError(
+                f"{path}:{line_number}: expected_points must be a string list"
+            )
+        mapping[result.eval_id] = {
+            "category": result.category.value,
+            "prompt": prompt,
+            "expected_points": expected_points,
+        }
     return mapping
+
+
+def iter_prediction_records(path: Path) -> list[tuple[int, dict[str, Any]]]:
+    records: list[tuple[int, dict[str, Any]]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ArtifactValidationError(
+                    f"{path}:{line_number}: malformed JSON: {exc.msg}"
+                ) from exc
+            if not isinstance(record, dict):
+                raise ArtifactValidationError(f"{path}:{line_number}: record must be an object")
+            records.append((line_number, record))
+    if not records:
+        raise ArtifactValidationError(f"{path}: no prediction records found")
+    return records
+
+
+def load_prediction_result(path: Path, line_number: int, record: dict[str, Any]) -> Any:
+    from pharma_llm_lab.baseline.results import BaselineResult
+
+    try:
+        return BaselineResult.from_mapping(record)
+    except BaselineResultError as exc:
+        raise ArtifactValidationError(f"{path}:{line_number}: {exc}") from exc
 
 
 def validate_phase4_eval_coverage(

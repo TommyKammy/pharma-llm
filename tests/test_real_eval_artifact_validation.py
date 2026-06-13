@@ -163,6 +163,21 @@ def write_run_plan(path: Path, *, local_root: Path, model_path: Path) -> Path:
         "mlx_config": {
             "model": str(model_path.resolve()),
             "adapter_path": str(adapter_path.resolve()),
+            "data": str(train_path.parent.resolve()),
+            "train": True,
+            "mask_prompt": True,
+            "iters": 2,
+            "batch_size": 1,
+            "num_layers": -1,
+            "max_seq_length": 128,
+            "learning_rate": 0.00001,
+            "seed": 0,
+            "lora_parameters": {
+                "rank": 16,
+                "scale": 32.0,
+                "dropout": 0.0,
+                "keys": ["self_attn.q_proj", "self_attn.v_proj"],
+            },
         },
     }
     path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -336,6 +351,29 @@ def test_validate_real_eval_artifacts_rejects_truncated_phase4_predictions(
         validate_real_eval_artifacts(**paths)
 
 
+def test_validate_real_eval_artifacts_rejects_stale_prediction_prompt(
+    tmp_path: Path,
+) -> None:
+    paths = write_artifact_set(tmp_path)
+    for key in ("base_predictions", "lora_predictions"):
+        records = [
+            json.loads(line)
+            for line in paths[key].read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        records[0]["prompt"] = "古いPhase 4 prompt"
+        paths[key].write_text(
+            "\n".join(json.dumps(record, ensure_ascii=False) for record in records) + "\n",
+            encoding="utf-8",
+        )
+    summary = aggregate_results(load_baseline_results(paths["base_predictions"]))
+    write_summary_json(paths["base_summary"], summary)
+    write_category_metrics_csv(paths["base_category_metrics"], summary)
+
+    with pytest.raises(ArtifactValidationError, match="must match Phase 4 eval set"):
+        validate_real_eval_artifacts(**paths)
+
+
 def test_validate_real_eval_artifacts_rejects_model_path_metadata_mismatch(
     tmp_path: Path,
 ) -> None:
@@ -354,4 +392,16 @@ def test_validate_real_eval_artifacts_rejects_stale_run_plan(tmp_path: Path) -> 
     paths["run_plan"].write_text(json.dumps(run_plan, ensure_ascii=False) + "\n", encoding="utf-8")
 
     with pytest.raises(ArtifactValidationError, match="adapter_path must match"):
+        validate_real_eval_artifacts(**paths)
+
+
+def test_validate_real_eval_artifacts_rejects_stale_run_plan_mlx_config(
+    tmp_path: Path,
+) -> None:
+    paths = write_artifact_set(tmp_path)
+    run_plan = json.loads(paths["run_plan"].read_text(encoding="utf-8"))
+    run_plan["mlx_config"]["train"] = False
+    paths["run_plan"].write_text(json.dumps(run_plan, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    with pytest.raises(ArtifactValidationError, match="mlx_config must match"):
         validate_real_eval_artifacts(**paths)
